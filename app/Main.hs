@@ -23,7 +23,7 @@ import Data.String (IsString (fromString))
 import qualified Data.Text as T (Text, pack, replace, strip, unpack)
 import Data.Text.Encoding (decodeUtf8)
 import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, formatTime, getCurrentTime, parseTimeM)
-import Database.SQLite.Simple (Connection, FromRow (fromRow), Query, close, execute, execute_, field, open, query_, toRow)
+import Database.SQLite.Simple (Connection, FromRow (fromRow), Only (Only), Query, close, execute, execute_, field, open, query, query_, toRow)
 import Network.HTTP.Simple (getResponseBody, httpBS, parseRequest)
 import Network.URI (URI (uriAuthority, uriScheme), URIAuth (..), parseURI)
 import System.Environment (getArgs)
@@ -33,17 +33,13 @@ import Text.HTML.TagSoup (Tag (..), fromAttrib, innerText, parseTags, partitions
 main :: IO ()
 main = do
   command <- getCommand
-  unless (command == InvalidCommand) $
-    runApp
-      ( \config -> do
-          _ <- initDB config
-          pure ()
-      )
   main' command
 
 main' :: Command -> IO ()
 main' command =
   case command of
+    Init -> do
+      runApp initDB
     AddFeed link -> do
       let url = parseURL link
       case url of
@@ -118,7 +114,8 @@ progHelp =
   \  purge - Purge everything\n"
 
 data Command
-  = AddFeed URL
+  = Init
+  | AddFeed URL
   | RefreshFeed URL
   | RefreshFeeds
   | ListFeeds
@@ -133,6 +130,7 @@ getCommand :: IO Command
 getCommand = do
   args <- getArgs
   pure $ case args of
+    ("init" : _) -> Init
     ("add" : url : _) -> AddFeed url
     ("remove" : url : _) -> RemoveFeed url
     ("list" : "feeds" : _) -> ListFeeds
@@ -273,13 +271,11 @@ initDB (Config {..}) = do
     ( \conn -> do
         _ <- setPragmas conn
         initializeTables conn
-        runMigrations conn
     )
 
 insertFeedItem :: Connection -> (Int, Day, FeedItem) -> IO (Maybe FeedItem)
 insertFeedItem conn (feedId, addedOn, feedItem@FeedItem {..}) = do
-  let unwrappedLink = fromMaybe "" link
-  rows <- failWith DatabaseError $ query_ conn (queryToCheckIfItemExists unwrappedLink) :: IO [FeedItem]
+  rows <- failWith DatabaseError $ query conn queryToCheckIfItemExists (Only link) :: IO [FeedItem]
   case rows of
     (_ : _) -> pure Nothing
     _ -> do
@@ -299,7 +295,7 @@ insertFeed feedUrl (Config {..}) = do
   let q = fromString $ "INSERT INTO feeds (url) VALUES ('" ++ feedUrl ++ "');"
   withResource connPool $ \conn -> do
     _ <- failWith DatabaseError $ execute_ conn q
-    failWith DatabaseError $ query_ conn (fromString $ "SELECT id, url FROM feeds where url = '" ++ feedUrl ++ "';")
+    failWith DatabaseError $ query conn (fromString $ "SELECT id, url FROM feeds where url = ?;") (Only feedUrl)
 
 getFeedUrlsFromDB :: App [(Int, URL)]
 getFeedUrlsFromDB (Config {..}) = failWith DatabaseError $ withResource connPool handleQuery
@@ -335,8 +331,8 @@ selectUrlFromFeeds = fromString "SELECT id, url FROM feeds where state = 'enable
 selectAllFeeds :: Query
 selectAllFeeds = fromString "SELECT url FROM feeds;"
 
-queryToCheckIfItemExists :: String -> Query
-queryToCheckIfItemExists link = fromString $ "select link, title, updated from feed_items where link = '" ++ link ++ "' limit 1;"
+queryToCheckIfItemExists :: Query
+queryToCheckIfItemExists = fromString "select link, title, updated from feed_items where link = ?;"
 
 insertFeedQuery :: Query
 insertFeedQuery = fromString "INSERT INTO feed_items (title, link, updated, feed_id, created_at) VALUES (?, ?, ?, ?, ?);" :: Query
@@ -346,7 +342,7 @@ processFeed (feedId, url) addedOn (Config {..}) = do
   putStrLn $ "Processing: " ++ url
   withResource connPool $ \conn -> do
     _ <- setPragmas conn
-    feedIdExists <- failWith DatabaseError (query_ conn (fromString $ "SELECT id FROM feeds where id = " ++ show feedId ++ ";")) :: IO [FeedId]
+    feedIdExists <- failWith DatabaseError (query conn (fromString "SELECT id FROM feeds where id = ?;") (Only feedId)) :: IO [FeedId]
     when (null feedIdExists) $ throw $ DatabaseError "You have to first add this feed to your database. Try `rdigest add <url>`."
     contents <- fetchUrl url
     contents `deepseq` do
@@ -394,9 +390,9 @@ removeFeed :: URL -> App ()
 removeFeed url (Config {..}) =
   withResource connPool $ \conn -> do
     _ <- setPragmas conn
-    res <- failWith DatabaseError $ query_ conn (fromString $ "SELECT id, url FROM feeds where url = '" ++ url ++ "';") :: IO [(Int, String)]
+    res <- failWith DatabaseError $ query conn (fromString $ "SELECT id, url FROM feeds where url = ?;") (Only url) :: IO [(Int, String)]
     when (null res) $ throw $ DatabaseError "I could not find any such feed in the database. Maybe it's already gone?"
-    justRunQuery conn $ fromString $ "DELETE FROM feeds where url = '" ++ url ++ "';"
+    execute conn (fromString "DELETE FROM feeds where url = ?;") (Only url)
 
 listFeeds :: App [[String]]
 listFeeds (Config {..}) = do
@@ -414,26 +410,14 @@ userConfirmation msg = do
   input <- getLine
   pure $ input == "y" || input == "Y"
 
-runMigrations :: Connection -> IO ()
-runMigrations conn = do
-  let addCreatedAtToFeeds = fromString "ALTER TABLE feeds ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;" :: Query
-      addCreateAtToFeedItems = fromString "ALTER TABLE feed_items ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;" :: Query
-      updateCreatedAtFeeds = fromString "UPDATE feeds SET created_at = CURRENT_TIMESTAMP where created_at is null" :: Query
-      updateCreatedAtFeedItems = fromString "UPDATE feed_items SET created_at = CURRENT_TIMESTAMP where created_at is null" :: Query
-  failWith DatabaseError $ execute_ conn $ fromString "PRAGMA foreign_keys = ON;"
-  failWith DatabaseError $ execute_ conn addCreatedAtToFeeds
-  failWith DatabaseError $ execute_ conn addCreateAtToFeedItems
-  failWith DatabaseError $ execute_ conn updateCreatedAtFeeds
-  failWith DatabaseError $ execute_ conn updateCreatedAtFeedItems
-
 type FeedItemWithId = (URL, FeedItem)
 
 createDigest :: (Day, Day) -> App [(URL, [FeedItem])]
 createDigest (day1, day2) config = withResource (connPool config) $ \conn -> do
-  xs <- failWith DatabaseError $ query_ conn query :: IO [(String, String, String, Day)]
+  xs <- failWith DatabaseError $ query conn q (day1, day2) :: IO [(String, String, String, Day)]
   pure $ groupByFeedUrl xs
   where
-    query = fromString $ "select feeds.url, f.link, f.title, f.updated from feed_items f join feeds on f.feed_id = feeds.id where f.updated >= '" ++ show day1 ++ "' and f.updated <= '" ++ show day2 ++ "' order by updated DESC;"
+    q = fromString "select feeds.url, f.link, f.title, f.updated from feed_items f join feeds on f.feed_id = feeds.id where f.updated >= ? and f.updated <= ? order by updated DESC;"
     groupByFeedUrl :: [(String, String, String, Day)] -> [(URL, [FeedItem])]
     groupByFeedUrl = foldr go' []
       where
@@ -546,8 +530,8 @@ showAppError (GeneralError msg) = putStrLn $ "Unknown error: " ++ msg
 
 refreshFeed :: URL -> App ()
 refreshFeed url config@Config {..} = do
-  let query = fromString $ "select id, url from feeds where url = '" ++ url ++ "';"
-  res <- withResource connPool $ \conn -> failWith DatabaseError $ query_ conn query :: IO [(Int, String)]
+  let q = fromString "select id, url from feeds where url = ?;"
+  res <- withResource connPool $ \conn -> failWith DatabaseError $ query conn q (Only url) :: IO [(Int, String)]
   case res of
     [] -> throw $ DatabaseError $ "I could not find " ++ url ++ " in your list of feeds. Try `rdigest list feeds` to see your feeds."
     (feedId, _) : _ -> do
