@@ -1,4 +1,4 @@
-cabal-version:      2.4
+cabal-version:      3.0
 name:               rdigest
 version:            0.1.0.0
 
@@ -19,9 +19,15 @@ maintainer:         chandru89new@gmail.com
 -- A copyright notice.
 -- copyright:
 -- category:
-extra-source-files: CHANGELOG.md, template.html
+extra-doc-files: CHANGELOG.md, template.html
+
+common warnings
+    ghc-options: -Wal
+
+build-type:         Simpl
 
 executable rdigest
+    import:           warnings
     main-is:          Main.hs
 
     -- Modules included in this executable, other than Main.
@@ -30,13 +36,13 @@ executable rdigest
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
-    build-depends:      base ^>=4.16.4.0,
+    build-depends:      base,
                         -- scalpel >= 0.6.1,
-                        async >= 2.2,
-                        tagsoup >= 0.14.8,
-                        text >= 1.2,
-                        http-conduit >= 2.3.8,
-                        bytestring >= 0.10,
+                        async,
+                        tagsoup,
+                        text,
+                        http-conduit,
+                        bytestring,
                         sqlite-simple,
                         transformers,
                         resource-pool,
