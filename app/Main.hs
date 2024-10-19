@@ -255,8 +255,8 @@ dbFile :: String
 dbFile = "./rdigest.db"
 
 justRunQuery :: Connection -> Query -> IO ()
-justRunQuery conn query = do
-  _ <- failWith DatabaseError $ execute_ conn query
+justRunQuery conn q = do
+  _ <- failWith DatabaseError $ execute_ conn q
   pure ()
 
 initializeTables :: Connection -> IO ()
@@ -279,7 +279,7 @@ insertFeedItem conn (feedId, addedOn, feedItem@FeedItem {..}) = do
   case rows of
     (_ : _) -> pure Nothing
     _ -> do
-      _ <- failWith DatabaseError $ execute conn insertFeedQuery $ toRow (title, link, updated, feedId, addedOn) :: IO ()
+      _ <- failWith DatabaseError $ execute conn insertFeedQuery $ toRow (title, link, updated, feedId) :: IO ()
       pure (Just feedItem)
 
 instance FromRow FeedItem where
@@ -335,7 +335,7 @@ queryToCheckIfItemExists :: Query
 queryToCheckIfItemExists = fromString "select link, title, updated from feed_items where link = ?;"
 
 insertFeedQuery :: Query
-insertFeedQuery = fromString "INSERT INTO feed_items (title, link, updated, feed_id, created_at) VALUES (?, ?, ?, ?, ?);" :: Query
+insertFeedQuery = fromString "INSERT INTO feed_items (title, link, updated, feed_id) VALUES (?, ?, ?, ?);" :: Query
 
 processFeed :: (Int, URL) -> Day -> App ()
 processFeed (feedId, url) addedOn (Config {..}) = do
@@ -455,7 +455,7 @@ writeDigest template (day1, day2) items = do
     wrapDate date = "<span class=\"digest-date\">" ++ date ++ "</span>"
 
     convertGroupToHtml :: (URL, [FeedItem]) -> String
-    convertGroupToHtml (url, xs) = "<details open><summary><h2 class=\"summary\">" ++ url ++ "</h2> (" ++ show (length xs) ++ ")</summary><p>" ++ feedItemsToHtml xs ++ "</p></details>"
+    convertGroupToHtml (url, xs) = "<details open><summary><h2 class=\"summary\">" ++ getDomain (Just url) ++ "</h2> (" ++ show (length xs) ++ ")</summary><p>" ++ feedItemsToHtml xs ++ "</p></details>"
 
 getDomain :: Maybe String -> String
 getDomain url =
