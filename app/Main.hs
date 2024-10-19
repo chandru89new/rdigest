@@ -39,7 +39,11 @@ main' :: Command -> IO ()
 main' command =
   case command of
     Init -> do
-      runApp initDB
+      runApp $ \config -> do
+        putStrLn "Initializing rdigest..."
+        putStrLn "If you ran this already, do not worry: all your current `rdigest` data is safe."
+        initDB config
+        putStrLn "Done."
     AddFeed link -> do
       let url = parseURL link
       case url of
@@ -101,6 +105,7 @@ main' command =
           _ <- runApp destroyDB
           putStrLn "Fin."
         else putStrLn "I have cancelled it."
+    ShowVersion -> putStrLn "rdigest v0.1.0"
     InvalidCommand -> putStrLn progHelp
 
 progHelp :: String
@@ -108,14 +113,15 @@ progHelp =
   "Usage: rdigest <command> [args]\n\
   \Commands:\n\
   \  help - Show this help.\n\
+  \  version - Show version info.\n\
   \  add <feed_url> - Add a feed. <feed_url> must be valid HTTP(S) URL.\n\
   \  remove <feed_url> - Remove a feed and all its associated posts with the given url.\n\
   \  digest - Generate the digest for today.\n\
   \  digest --from <start_date> --to <end_date> - Generate the digest for a given date range. Dates in the YYYY-MM-DD format.\n\
-  \  list feeds - List all feeds\n\
-  \  refresh - Refresh all feeds\n\
+  \  list feeds - List all feeds.\n\
+  \  refresh - Refresh all feeds.\n\
   \  refresh <feed_url> - Refresh feed at <feed_url>. The <feed_url> must already be in your database.\n\
-  \  purge - Purge everything\n"
+  \  purge - Purge everything.\n"
 
 data Command
   = Init
@@ -128,6 +134,7 @@ data Command
   | PurgeEverything
   | InvalidCommand
   | CreateRangeDigest [ArgPair]
+  | ShowVersion
   deriving (Eq)
 
 getCommand :: IO Command
@@ -143,6 +150,8 @@ getCommand = do
     ["digest"] -> CreateTodayDigest
     ("digest" : xs) -> CreateRangeDigest $ groupCommandArgs xs
     ("purge" : _) -> PurgeEverything
+    ("version" : _) -> ShowVersion
+    ("--version" : _) -> ShowVersion
     ("help" : _) -> InvalidCommand
     _ -> InvalidCommand
 
@@ -352,9 +361,14 @@ processFeed (feedId, url) (Config {..}) = do
     contents `deepseq` do
       feedItems <- evaluate (extractFeedItems contents)
       let unwrappedFeedItems = fromMaybe [] feedItems
-      when (null unwrappedFeedItems) $ putStrLn $ "I couldn't find anything on: " ++ url ++ "."
+      when (null unwrappedFeedItems) $ do
+        putStrLn $ "I couldn't find anything on: " ++ url ++ "."
       res <- (try $ failWith DatabaseError $ doInserts conn unwrappedFeedItems) :: IO (Either AppError [Int])
-      when ((not . null) unwrappedFeedItems && isRight res) $ putStrLn $ "Finished processing " ++ url ++ ". I discovered " ++ show (length unwrappedFeedItems) ++ " posts. I have added " ++ show (sum $ fromRight [] res) ++ " posts to the database (duplicates are ignored)."
+      when ((not . null) unwrappedFeedItems && isRight res) $ do
+        putStrLn $ "Finished processing " ++ url ++ "."
+        putStrLn $ "Discovered: " ++ show (length unwrappedFeedItems) ++ " posts."
+        putStrLn $ "Added: " ++ show (sum $ fromRight [] res) ++ " posts (duplicates are ignored)."
+      putStrLn "-----"
   where
     doInserts :: Connection -> [FeedItem] -> IO [Int]
     doInserts conn = mapM (handleInsert conn)
@@ -446,7 +460,7 @@ writeDigest template (day1, day2) items = do
     generateDigestContent :: [(URL, [FeedItem])] -> String
     generateDigestContent xs =
       let titleReplaced = replaceDigestTitle ("Digest — " ++ dateRange ++ ":") template
-          summaryReplaced = replaceDigestSummary ("You have " ++ show (Prelude.length $ concatMap snd xs) ++ " posts to catch up on.") titleReplaced
+          summaryReplaced = replaceDigestSummary ("There are " ++ show (Prelude.length $ concatMap snd xs) ++ " posts.") titleReplaced
           contentReplaced = replaceDigestContent (concatMap convertGroupToHtml xs) summaryReplaced
        in contentReplaced
 
@@ -457,7 +471,7 @@ writeDigest template (day1, day2) items = do
     wrapDate date = "<span class=\"digest-date\">" ++ date ++ "</span>"
 
     convertGroupToHtml :: (URL, [FeedItem]) -> String
-    convertGroupToHtml (url, xs) = "<details open><summary><h2 class=\"summary\">" ++ getDomain (Just url) ++ "</h2> (" ++ show (length xs) ++ ")</summary><p>" ++ feedItemsToHtml xs ++ "</p></details>"
+    convertGroupToHtml (url, xs) = "<details open><summary><h2 class=\"summary\">" ++ getDomain (Just url) ++ "</h2> (" ++ show (length xs) ++ ")</summary>" ++ feedItemsToHtml xs ++ "</details>"
 
 getDomain :: Maybe String -> String
 getDomain url =
