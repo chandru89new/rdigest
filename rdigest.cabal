@@ -22,7 +22,7 @@ maintainer:         chandru89new@gmail.com
 extra-doc-files: CHANGELOG.md, template.html
 
 common warnings
-    ghc-options: -Wal
+    ghc-options: -Wall
 
 build-type:         Simpl
 

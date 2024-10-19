@@ -72,10 +72,6 @@
       border-top: 1px solid aliceblue;
     }
 
-    div.title {
-      color: cornflowerblue;
-    }
-
     li .date {
       font-size: 0.65em;
       color: slategray;
@@ -87,7 +83,16 @@
     }
 
     a {
+      color: cornflowerblue;
       text-decoration: none;
+    }
+
+    a:visited {
+      color: lightblue !important;
+    }
+
+    a:visited * {
+      opacity: 0.5;
     }
 
     p.summary {

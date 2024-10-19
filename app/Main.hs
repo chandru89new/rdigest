@@ -45,15 +45,17 @@ main' command =
       case url of
         Just _url -> do
           runApp $ \config -> do
-            res <- try $ insertFeed _url config
-            either showAppError (const $ putStrLn "Added.") res
-            when (isRight res) $ processFeeds (fromRight [] res) config
+            res <- insertFeed _url config
+            unless (null res) $ do
+              putStrLn $ "I have added the feed: " ++ link ++ "."
+            processFeeds res config
         Nothing -> putStrLn "I am not able to parse the URL. Please provide a valid URL."
     RemoveFeed url -> runApp $ \config -> do
       input <- userConfirmation "This will remove the feed and all the posts associated with it."
       if input
         then do
           removeFeed url config
+          putStrLn "Removed."
         else putStrLn "I have cancelled it."
     ListFeeds -> runApp $ \config -> do
       feeds <- listFeeds config >>= pure . concat
@@ -62,10 +64,12 @@ main' command =
       runApp $ \config -> do
         refreshFeed url config
         putStrLn "I have refreshed the feed."
+        main' CreateTodayDigest
     RefreshFeeds -> do
       runApp $ \config -> do
-        updateAllFeeds config
+        _ <- updateAllFeeds config
         putStrLn "I have refreshed all the feeds."
+        main' CreateTodayDigest
     CreateTodayDigest -> do
       today <- fmap utctDay getCurrentTime
       runApp $ \config@Config {..} -> do
@@ -110,7 +114,7 @@ progHelp =
   \  digest --from <start_date> --to <end_date> - Generate the digest for a given date range. Dates in the YYYY-MM-DD format.\n\
   \  list feeds - List all feeds\n\
   \  refresh - Refresh all feeds\n\
-  \  refresh <feed_url> - Refresh feed at <feed_url>. The <feed_url> must be already in your database.\n\
+  \  refresh <feed_url> - Refresh feed at <feed_url>. The <feed_url> must already be in your database.\n\
   \  purge - Purge everything\n"
 
 data Command
@@ -273,8 +277,8 @@ initDB (Config {..}) = do
         initializeTables conn
     )
 
-insertFeedItem :: Connection -> (Int, Day, FeedItem) -> IO (Maybe FeedItem)
-insertFeedItem conn (feedId, addedOn, feedItem@FeedItem {..}) = do
+insertFeedItem :: Connection -> (Int, FeedItem) -> IO (Maybe FeedItem)
+insertFeedItem conn (feedId, feedItem@FeedItem {..}) = do
   rows <- failWith DatabaseError $ query conn queryToCheckIfItemExists (Only link) :: IO [FeedItem]
   case rows of
     (_ : _) -> pure Nothing
@@ -292,10 +296,10 @@ instance FromRow FeedId where
 
 insertFeed :: URL -> App [(Int, URL)]
 insertFeed feedUrl (Config {..}) = do
-  let q = fromString $ "INSERT INTO feeds (url) VALUES ('" ++ feedUrl ++ "');"
-  withResource connPool $ \conn -> do
-    _ <- failWith DatabaseError $ execute_ conn q
-    failWith DatabaseError $ query conn (fromString $ "SELECT id, url FROM feeds where url = ?;") (Only feedUrl)
+  let q = fromString "INSERT INTO feeds (url) VALUES (?);"
+  failWith DatabaseError $ withResource connPool $ \conn -> do
+    execute conn q (Only feedUrl)
+    query conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only feedUrl)
 
 getFeedUrlsFromDB :: App [(Int, URL)]
 getFeedUrlsFromDB (Config {..}) = failWith DatabaseError $ withResource connPool handleQuery
@@ -337,8 +341,8 @@ queryToCheckIfItemExists = fromString "select link, title, updated from feed_ite
 insertFeedQuery :: Query
 insertFeedQuery = fromString "INSERT INTO feed_items (title, link, updated, feed_id) VALUES (?, ?, ?, ?);" :: Query
 
-processFeed :: (Int, URL) -> Day -> App ()
-processFeed (feedId, url) addedOn (Config {..}) = do
+processFeed :: (Int, URL) -> App ()
+processFeed (feedId, url) (Config {..}) = do
   putStrLn $ "Processing: " ++ url
   withResource connPool $ \conn -> do
     _ <- setPragmas conn
@@ -358,16 +362,14 @@ processFeed (feedId, url) addedOn (Config {..}) = do
 
     handleInsert :: Connection -> FeedItem -> IO Int
     handleInsert conn feedItem = do
-      res <- try $ insertFeedItem conn (feedId, addedOn, feedItem) >>= evaluate :: IO (Either AppError (Maybe FeedItem))
+      res <- try $ insertFeedItem conn (feedId, feedItem) >>= evaluate :: IO (Either AppError (Maybe FeedItem))
       when (isLeft res) $ print (fromLeft (DatabaseError "I ran into an error when trying to save a feed to the database.") res)
       pure $ either (const 0) (\r -> if isJust r then 1 else 0) res
 
 processFeeds :: [(Int, URL)] -> App ()
 processFeeds urls config = do
-  utcTime <- getCurrentTime
-  let addedOn = utctDay utcTime
   forM_ urls $ \url -> do
-    res <- (try :: IO a -> IO (Either AppError a)) $ processFeed url addedOn config
+    res <- (try :: IO a -> IO (Either AppError a)) $ processFeed url config
     case res of
       Left e -> showAppError e
       Right _ -> pure ()
@@ -377,7 +379,7 @@ updateAllFeeds config = do
   urls <- getFeedUrlsFromDB config
   processFeeds urls config
 
-nothingIfEmpty :: Foldable t => t a -> Maybe (t a)
+nothingIfEmpty :: (Foldable t) => t a -> Maybe (t a)
 nothingIfEmpty a = if null a then Nothing else Just a
 
 destroyDB :: App ()
@@ -390,7 +392,7 @@ removeFeed :: URL -> App ()
 removeFeed url (Config {..}) =
   withResource connPool $ \conn -> do
     _ <- setPragmas conn
-    res <- failWith DatabaseError $ query conn (fromString $ "SELECT id, url FROM feeds where url = ?;") (Only url) :: IO [(Int, String)]
+    res <- failWith DatabaseError $ query conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only url) :: IO [(Int, String)]
     when (null res) $ throw $ DatabaseError "I could not find any such feed in the database. Maybe it's already gone?"
     execute conn (fromString "DELETE FROM feeds where url = ?;") (Only url)
 
