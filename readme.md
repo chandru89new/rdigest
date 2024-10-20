@@ -28,16 +28,33 @@ Make sure you set up an `RDIGEST_FOLDER` environment variable before you use `rd
 > export RDIGEST_FOLDER=<path-to-where-rdigest-data-should-be-stored>
 ```
 
-```
-> rdigest help -- prints help
-> rdigest add <feed_url> -- adds an RSS feed, and will immediately get posts from that feed and add to the database
-> rdigest remove <feed_url> -- removes the feed and deletes all posts that belong to that feed
-> rdigest list feeds -- show all feeds
-> rdigest refresh -- refresh all feeds, get all their posts/content and update the database. No duplicate content will be added though.
-> rdigest digest -- create today's digest.
-> rdigest digest --from YYYY-MM-DD --to YYYY-MM-DD -- create a digest between the date range
-> rdigest refresh <feed_url> -- just update one feed
-> rdigest purge -- delete everything, remove the database. This won't delete the digests.
+```bash
+# prints help
+> rdigest help
+
+# adds an RSS feed, and will immediately get posts from that feed and add to the database
+> rdigest add <feed_url>
+
+# removes the feed and deletes all posts that belong to that feed
+> rdigest remove <feed_url>
+
+# show all feeds
+> rdigest list feeds
+
+# refresh all feeds, get all their posts/content and update the database. No duplicate content will be added though.
+> rdigest refresh
+
+# create today's digest.
+> rdigest digest
+
+# create a digest between the date range
+> rdigest digest --from YYYY-MM-DD --to YYYY-MM-DD
+
+# just update one feed
+> rdigest refresh <feed_url>
+
+# delete everything, remove the database. This won't delete the digests.
+> rdigest purge
 ```
 
 ## Roadmap
