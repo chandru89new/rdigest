@@ -13,20 +13,21 @@ import Control.Applicative ((<|>))
 import Control.DeepSeq (deepseq)
 import Control.Exception (Exception, SomeException, evaluate, throw, try)
 import Control.Monad (forM_, unless, when)
-import qualified Data.ByteString.Char8 as BS (ByteString, unpack)
+import qualified Data.ByteString.Char8 as BS
+import Data.CaseInsensitive (mk)
 import Data.Either (fromLeft, fromRight, isLeft, isRight)
 import Data.FileEmbed (embedFile)
 import Data.List (intercalate, isInfixOf)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Pool (Pool, defaultPoolConfig, destroyAllResources, newPool, withResource)
 import Data.String (IsString (fromString))
-import qualified Data.Text as T (Text, pack, replace, strip, unpack)
+import qualified Data.Text as T (Text, null, pack, replace, splitOn, strip, unpack)
 import Data.Text.Encoding (decodeUtf8)
 import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, formatTime, getCurrentTime, parseTimeM)
-import Database.SQLite.Simple (Connection, FromRow (fromRow), Only (Only), Query, close, execute, execute_, field, open, query, query_, toRow)
-import Network.HTTP.Simple (getResponseBody, httpBS, parseRequest)
+import Database.SQLite.Simple (Connection, FromRow (fromRow), Only (Only), Query, close, execute, execute_, field, open, query, query_, toRow, withTransaction)
+import Network.HTTP.Simple (getResponseBody, httpBS, parseRequest, setRequestHeader)
 import Network.URI (URI (uriAuthority, uriScheme), URIAuth (..), parseURI)
-import System.Environment (getArgs)
+import System.Environment (getArgs, lookupEnv)
 import System.IO (hFlush, stdout)
 import Text.HTML.TagSoup (Tag (..), fromAttrib, innerText, parseTags, partitions, (~/=), (~==))
 
@@ -76,25 +77,25 @@ main' command =
         main' CreateTodayDigest
     CreateTodayDigest -> do
       today <- fmap utctDay getCurrentTime
-      runApp $ \config@Config {..} -> do
+      runApp $ \config -> do
         items <- createDigest (today, today) config
         if null items
           then putStrLn $ "I can't create a digest for " ++ showDay today ++ ". There are no posts to make a digest out of."
           else do
             putStrLn $ "I am now preparing digest for " ++ showDay today ++ ". Give me a few seconds..."
-            file <- writeDigest template (today, today) items
+            file <- writeDigest config (today, today) items
             putStrLn $ "I have saved the digest file at " ++ file ++ "."
     CreateRangeDigest argPairs -> do
       from <- pure $ extractArgString "--from" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
       to <- pure $ extractArgString "--to" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
-      runApp $ \config@Config {..} -> case (from, to) of
+      runApp $ \config -> case (from, to) of
         (Just s, Just e) -> do
           items <- createDigest (s, e) config
           if null items
             then putStrLn "There are not posts in the given range to make a digest."
             else do
               putStrLn $ "I am now preparing digest for " ++ showDay s ++ " to " ++ showDay e ++ "..."
-              file <- writeDigest template (s, e) items
+              file <- writeDigest config (s, e) items
               putStrLn $ "I have saved the digest file at " ++ file ++ "."
         (_, _) -> showAppError $ ArgError "I couldn't understand the date range values. Provide a valid date range in the YYYY-MM-DD format. Type 'rdigest help' for more information."
     PurgeEverything -> do
@@ -168,7 +169,8 @@ failWith mkError action = do
 fetchUrl :: String -> IO BS.ByteString
 fetchUrl url = failWith FetchError $ do
   req <- parseRequest url
-  httpBS req >>= pure . getResponseBody
+  let withHeader = setRequestHeader (mk $ BS.pack "User-Agent") [BS.pack "Mozilla/5.0"] req
+  httpBS withHeader >>= pure . getResponseBody
 
 type App a = Config -> IO a
 
@@ -184,16 +186,20 @@ data AppError
 instance Exception AppError
 
 data Config = Config
-  {connPool :: Pool Connection, template :: String}
+  {connPool :: Pool Connection, template :: String, rdigestPath :: String}
 
 runApp :: App a -> IO ()
 runApp app = do
   let template = $(embedFile "./template.html")
-  pool <- newPool (defaultPoolConfig (open dbFile) close 60.0 10)
-  let config = Config {connPool = pool, template = BS.unpack template}
-  res <- (try :: IO a -> IO (Either AppError a)) $ app config
-  destroyAllResources pool
-  either showAppError (const $ return ()) res
+  rdigestPath <- lookupEnv "RDIGEST_FOLDER"
+  case rdigestPath of
+    Nothing -> showAppError $ GeneralError "It looks like you have not set the RDIGEST_FOLDER env. `export RDIGEST_FOLDER=<full-path-where-rdigest-should-save-data>"
+    Just rdPath -> do
+      pool <- newPool (defaultPoolConfig (open (getDBFile rdPath)) close 60.0 10)
+      let config = Config {connPool = pool, template = BS.unpack template, rdigestPath = rdPath}
+      res <- (try :: IO a -> IO (Either AppError a)) $ app config
+      destroyAllResources pool
+      either showAppError (const $ return ()) res
 
 trim :: String -> String
 trim = T.unpack . T.strip . T.pack
@@ -451,10 +457,10 @@ feedItemsToHtml items = "<ul>" ++ concatMap (\item@FeedItem {..} -> "<a class=\"
     feedItemToHtmlLink FeedItem {..} =
       "<div class=\"title\">" ++ title ++ "</div><div class=\"domain\">" ++ getDomain link ++ " &bull; " ++ maybe "" showDay updated ++ "</div>"
 
-writeDigest :: String -> (Day, Day) -> [(URL, [FeedItem])] -> IO String
-writeDigest template (day1, day2) items = do
+writeDigest :: Config -> (Day, Day) -> [(URL, [FeedItem])] -> IO String
+writeDigest (Config {..}) (day1, day2) items = do
   let filename = "digest-" ++ show day2 ++ ".html"
-  failWith DigestError $ writeFile filename (generateDigestContent items)
+  failWith DigestError $ writeFile (rdigestPath ++ "/" ++ filename) (generateDigestContent items)
   pure filename
   where
     generateDigestContent :: [(URL, [FeedItem])] -> String
@@ -542,7 +548,7 @@ showAppError (DatabaseError msg) = putStrLn $ "Database error: " ++ msg
 showAppError (FeedParseError msg) = putStrLn $ "Error parsing feed: " ++ msg
 showAppError (ArgError msg) = putStrLn $ "Argument error: " ++ msg
 showAppError (DigestError msg) = putStrLn $ "Digest error: " ++ msg
-showAppError (GeneralError msg) = putStrLn $ "Unknown error: " ++ msg
+showAppError (GeneralError msg) = putStrLn $ "Error: " ++ msg
 
 refreshFeed :: URL -> App ()
 refreshFeed url config@Config {..} = do
@@ -552,3 +558,35 @@ refreshFeed url config@Config {..} = do
     [] -> throw $ DatabaseError $ "I could not find " ++ url ++ " in your list of feeds. Try `rdigest list feeds` to see your feeds."
     (feedId, _) : _ -> do
       processFeeds [(feedId, url)] config
+
+getDBFile :: String -> String
+getDBFile = (++ "/rdigest.db")
+
+-- test = do
+--   contents <- fetchUrl "https://reddit.com/r/Chennai/.rss"
+--   print contents
+--   feedItems <- parseContents contents
+--   print feedItems
+--   where
+--     parseContents :: BS.ByteString -> IO (Maybe [FeedItem])
+--     parseContents c = do
+--       let tags = parseTags (T.unpack $ decodeUtf8 c)
+--           entryTags = partitions (~== "<entry>") tags -- this is for youtube feeds only
+--           itemTags = partitions (~== "<item>") tags
+--       print entryTags
+--       pure $ case (itemTags, entryTags) of
+--         ([], []) -> Nothing
+--         (xs, []) -> Just $ map extractFeedItem xs
+--         ([], ys) -> Just $ map extractFeedItem ys
+--         (xs, ys) -> Just $ map extractFeedItem (xs ++ ys)
+
+newtype MultipleQueries = MultipleQueries String
+
+runMultipleQueries :: Connection -> MultipleQueries -> IO ()
+runMultipleQueries conn (MultipleQueries queries) = do
+  let qs = filter (not . T.null) $ map T.strip $ T.splitOn (T.pack ";") (T.pack queries)
+  failWith DatabaseError $ withTransaction conn $ forM_ qs $ \q -> do
+    res <- try $ execute_ conn (fromString (T.unpack q)) :: IO (Either SomeException ())
+    print res
+
+-- putStrLn $ "Executed query successfully:" ++ T.unpack q
