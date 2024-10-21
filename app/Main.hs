@@ -107,7 +107,9 @@ main' command =
           putStrLn "Fin."
         else putStrLn "I have cancelled it."
     ShowVersion -> putStrLn "rdigest v0.1.0"
-    InvalidCommand -> putStrLn progHelp
+    ShowHelp -> putStrLn progHelp
+    InvalidCommand -> do
+      putStrLn "I could not recognize that command. Try `rdigest help`."
 
 progHelp :: String
 progHelp =
@@ -135,6 +137,7 @@ data Command
   | PurgeEverything
   | CreateRangeDigest [ArgPair]
   | ShowVersion
+  | ShowHelp
   | InvalidCommand
   deriving (Eq)
 
@@ -142,6 +145,7 @@ getCommand :: IO Command
 getCommand = do
   args <- getArgs
   pure $ case args of
+    ("help" : _) -> ShowHelp
     ("init" : _) -> Init
     ("add" : url : _) -> AddFeed url
     ("remove" : url : _) -> RemoveFeed url
@@ -153,7 +157,6 @@ getCommand = do
     ("purge" : _) -> PurgeEverything
     ("version" : _) -> ShowVersion
     ("--version" : _) -> ShowVersion
-    ("help" : _) -> InvalidCommand
     _ -> InvalidCommand
 
 parseURL :: String -> Maybe URL
@@ -269,9 +272,6 @@ parseDate datetime = fmap utctDay $ firstJust $ map tryParse [fmt1, fmt2, fmt3, 
         go (x : xs_) acc = case x of
           Just y -> Just y
           Nothing -> go xs_ acc
-
-dbFile :: String
-dbFile = "./rdigest.db"
 
 justRunQuery :: Connection -> Query -> IO ()
 justRunQuery conn q = do
@@ -389,7 +389,7 @@ processFeed (feedId, url) (Config {..}) = do
 processFeeds :: [(Int, URL)] -> App ()
 processFeeds urls config = do
   forM_ urls $ \url -> do
-    res <- (try :: IO a -> IO (Either AppError a)) $ processFeed url config
+    res <- (try $ processFeed url config) :: IO (Either AppError ())
     case res of
       Left e -> showAppError e
       Right _ -> pure ()
