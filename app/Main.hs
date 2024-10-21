@@ -133,9 +133,9 @@ data Command
   | RemoveFeed URL
   | CreateTodayDigest
   | PurgeEverything
-  | InvalidCommand
   | CreateRangeDigest [ArgPair]
   | ShowVersion
+  | InvalidCommand
   deriving (Eq)
 
 getCommand :: IO Command
@@ -459,9 +459,9 @@ feedItemsToHtml items = "<ul>" ++ concatMap (\item@FeedItem {..} -> "<a class=\"
 
 writeDigest :: Config -> (Day, Day) -> [(URL, [FeedItem])] -> IO String
 writeDigest (Config {..}) (day1, day2) items = do
-  let filename = "digest-" ++ show day2 ++ ".html"
-  failWith DigestError $ writeFile (rdigestPath ++ "/" ++ filename) (generateDigestContent items)
-  pure filename
+  let filePath = rdigestPath ++ "/digest-" ++ show day2 ++ ".html"
+  failWith DigestError $ writeFile filePath (generateDigestContent items)
+  pure filePath
   where
     generateDigestContent :: [(URL, [FeedItem])] -> String
     generateDigestContent xs =
@@ -524,10 +524,6 @@ groupCommandArgs = go []
         isFlag :: String -> Bool
         isFlag str = "--" `isInfixOf` str && length str > 2
 
-{-
-if ("--test" : "value" : _) -> acc ++ [("test", "value")]
-if ("--test" : x starts with "--" : xs) -> acc ++ [("test", ArgBool True)] ++ go (x:xs)
--}
 extractArgString :: String -> [ArgPair] -> Maybe String
 extractArgString key argPairs = lookup key argPairs >>= extractString
   where
@@ -562,24 +558,6 @@ refreshFeed url config@Config {..} = do
 getDBFile :: String -> String
 getDBFile = (++ "/rdigest.db")
 
--- test = do
---   contents <- fetchUrl "https://reddit.com/r/Chennai/.rss"
---   print contents
---   feedItems <- parseContents contents
---   print feedItems
---   where
---     parseContents :: BS.ByteString -> IO (Maybe [FeedItem])
---     parseContents c = do
---       let tags = parseTags (T.unpack $ decodeUtf8 c)
---           entryTags = partitions (~== "<entry>") tags -- this is for youtube feeds only
---           itemTags = partitions (~== "<item>") tags
---       print entryTags
---       pure $ case (itemTags, entryTags) of
---         ([], []) -> Nothing
---         (xs, []) -> Just $ map extractFeedItem xs
---         ([], ys) -> Just $ map extractFeedItem ys
---         (xs, ys) -> Just $ map extractFeedItem (xs ++ ys)
-
 newtype MultipleQueries = MultipleQueries String
 
 runMultipleQueries :: Connection -> MultipleQueries -> IO ()
@@ -588,5 +566,3 @@ runMultipleQueries conn (MultipleQueries queries) = do
   failWith DatabaseError $ withTransaction conn $ forM_ qs $ \q -> do
     res <- try $ execute_ conn (fromString (T.unpack q)) :: IO (Either SomeException ())
     print res
-
--- putStrLn $ "Executed query successfully:" ++ T.unpack q

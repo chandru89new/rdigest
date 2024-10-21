@@ -38,7 +38,6 @@ executable rdigest
     -- other-extensions:
     build-depends:      base,
                         -- scalpel >= 0.6.1,
-                        async,
                         tagsoup,
                         text,
                         http-conduit,
