@@ -443,9 +443,11 @@ createDigest (day1, day2) config = withResource (connPool config) $ \conn -> do
     groupByFeedUrl :: [(String, String, String, Day)] -> [(URL, [FeedItem])]
     groupByFeedUrl = foldr go' []
       where
-        go' (url, link, title, updated) acc = case lookup url acc of
-          Just xs -> (url, FeedItem {title = title, link = Just link, updated = Just updated} : xs) : filter ((/= url) . fst) acc
-          Nothing -> (url, [FeedItem {title = title, link = Just link, updated = Just updated}]) : acc
+        go' (url, link, title, updated) acc =
+          let domain = getDomain $ Just url
+           in case lookup domain acc of
+                Just xs -> (domain, FeedItem {title = title, link = Just link, updated = Just updated} : xs) : filter ((/= domain) . fst) acc
+                Nothing -> (domain, [FeedItem {title = title, link = Just link, updated = Just updated}]) : acc
 
 logFeedItem :: FeedItem -> IO ()
 logFeedItem FeedItem {..} = putStrLn $ title ++ "(" ++ fromMaybe "" link ++ ")"
@@ -477,7 +479,7 @@ writeDigest (Config {..}) (day1, day2) items = do
     wrapDate date = "<span class=\"digest-date\">" ++ date ++ "</span>"
 
     convertGroupToHtml :: (URL, [FeedItem]) -> String
-    convertGroupToHtml (url, xs) = "<details open><summary><h2 class=\"summary\">" ++ getDomain (Just url) ++ "</h2> (" ++ show (length xs) ++ ")</summary>" ++ feedItemsToHtml xs ++ "</details>"
+    convertGroupToHtml (url, xs) = "<details open><summary><h2 class=\"summary\">" ++ url ++ "</h2> (" ++ show (length xs) ++ ")</summary>" ++ feedItemsToHtml xs ++ "</details>"
 
 getDomain :: Maybe String -> String
 getDomain url =
