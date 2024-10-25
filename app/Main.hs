@@ -10,14 +10,13 @@
 module Main where
 
 import Control.Applicative ((<|>))
-import Control.DeepSeq (deepseq)
 import Control.Exception (Exception, SomeException, evaluate, throw, try)
 import Control.Monad (forM_, unless, when)
 import qualified Data.ByteString.Char8 as BS
 import Data.CaseInsensitive (mk)
 import Data.Either (fromLeft, fromRight, isLeft, isRight)
 import Data.FileEmbed (embedFile)
-import Data.List (intercalate, isInfixOf)
+import Data.List (intercalate, isInfixOf, sortBy)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Pool (Pool, defaultPoolConfig, destroyAllResources, newPool, withResource)
 import Data.String (IsString (fromString))
@@ -284,13 +283,20 @@ initializeTables conn = do
   justRunQuery conn createFeedItemsTable
 
 initDB :: App ()
-initDB (Config {..}) = do
+initDB config@(Config {..}) = do
   withResource
     connPool
     ( \conn -> do
         _ <- setPragmas conn
         initializeTables conn
     )
+  titleExists <- checkIfTitleColumnExists config
+  if titleExists
+    then pure ()
+    else do
+      putStrLn "Updating the database..."
+      withResource connPool $ \conn -> runMultipleQueries conn addTitleAndCreatedAtColumns
+      updateTitleForFeeds config
 
 insertFeedItem :: Connection -> (Int, FeedItem) -> IO (Maybe FeedItem)
 insertFeedItem conn (feedId, feedItem@FeedItem {..}) = do
@@ -364,17 +370,16 @@ processFeed (feedId, url) (Config {..}) = do
     feedIdExists <- failWith DatabaseError (query conn (fromString "SELECT id FROM feeds where id = ?;") (Only feedId)) :: IO [FeedId]
     when (null feedIdExists) $ throw $ DatabaseError "You have to first add this feed to your database. Try `rdigest add <url>`."
     contents <- fetchUrl url
-    contents `deepseq` do
-      feedItems <- evaluate (extractFeedItems contents)
-      let unwrappedFeedItems = fromMaybe [] feedItems
-      when (null unwrappedFeedItems) $ do
-        putStrLn $ "I couldn't find anything on: " ++ url ++ "."
-      res <- (try $ failWith DatabaseError $ doInserts conn unwrappedFeedItems) :: IO (Either AppError [Int])
-      when ((not . null) unwrappedFeedItems && isRight res) $ do
-        putStrLn $ "Finished processing " ++ url ++ "."
-        putStrLn $ "Discovered: " ++ show (length unwrappedFeedItems) ++ " posts."
-        putStrLn $ "Added: " ++ show (sum $ fromRight [] res) ++ " posts (duplicates are ignored)."
-      putStrLn "-----"
+    feedItems <- evaluate (extractFeedItems contents)
+    let unwrappedFeedItems = fromMaybe [] feedItems
+    when (null unwrappedFeedItems) $ do
+      putStrLn $ "I couldn't find anything on: " ++ url ++ "."
+    res <- (try $ failWith DatabaseError $ doInserts conn unwrappedFeedItems) :: IO (Either AppError [Int])
+    when ((not . null) unwrappedFeedItems && isRight res) $ do
+      putStrLn $ "Finished processing " ++ url ++ "."
+      putStrLn $ "Discovered: " ++ show (length unwrappedFeedItems) ++ " posts."
+      putStrLn $ "Added: " ++ show (sum $ fromRight [] res) ++ " posts (duplicates are ignored)."
+    putStrLn "-----"
   where
     doInserts :: Connection -> [FeedItem] -> IO [Int]
     doInserts conn = mapM (handleInsert conn)
@@ -432,40 +437,45 @@ userConfirmation msg = do
   input <- getLine
   pure $ input == "y" || input == "Y"
 
-type FeedItemWithId = (URL, FeedItem)
+data FeedItemWithMeta = FeedItemWithMeta {feedItem :: FeedItem, feedTitle :: String, feedURL :: URL} deriving (Show)
 
-createDigest :: (Day, Day) -> App [(URL, [FeedItem])]
+createDigest :: (Day, Day) -> App [FeedItemWithMeta]
 createDigest (day1, day2) config = withResource (connPool config) $ \conn -> do
-  xs <- failWith DatabaseError $ query conn q (day1, day2) :: IO [(String, String, String, Day)]
-  pure $ groupByFeedUrl xs
+  xs <- failWith DatabaseError $ query conn q (day1, day2) :: IO [(String, String, String, String, Day)]
+  pure $ map (\(url, feedTitle, link, title, updated) -> FeedItemWithMeta {feedItem = FeedItem {title = title, link = Just link, updated = Just updated}, feedTitle = feedTitle, feedURL = url}) xs
   where
-    q = fromString "select feeds.url, f.link, f.title, f.updated from feed_items f join feeds on f.feed_id = feeds.id where f.updated >= ? and f.updated <= ? order by updated DESC;"
-    groupByFeedUrl :: [(String, String, String, Day)] -> [(URL, [FeedItem])]
-    groupByFeedUrl = foldr go' []
-      where
-        go' (url, link, title, updated) acc =
-          let domain = getDomain $ Just url
-           in case lookup domain acc of
-                Just xs -> (domain, FeedItem {title = title, link = Just link, updated = Just updated} : xs) : filter ((/= domain) . fst) acc
-                Nothing -> (domain, [FeedItem {title = title, link = Just link, updated = Just updated}]) : acc
+    q = fromString "select feeds.url, feeds.title as feed_title, f.link, f.title, f.updated from feed_items f join feeds on f.feed_id = feeds.id where f.updated >= ? and f.updated <= ? order by updated DESC;"
 
 logFeedItem :: FeedItem -> IO ()
 logFeedItem FeedItem {..} = putStrLn $ title ++ "(" ++ fromMaybe "" link ++ ")"
 
-feedItemsToHtml :: [FeedItem] -> String
-feedItemsToHtml items = "<ul>" ++ concatMap (\item@FeedItem {..} -> "<a class=\"li\" href=\"" ++ fromMaybe "" link ++ "\"><li>" ++ feedItemToHtmlLink item ++ "</li></a>") items ++ "</ul>"
+feedItemsToHtml :: [FeedItemWithMeta] -> String
+feedItemsToHtml items = "<ul>" ++ concatMap (\item@FeedItemWithMeta {..} -> "<a class=\"li\" href=\"" ++ fromMaybe "" (link feedItem) ++ "\"><li>" ++ feedItemToHtmlLink item ++ "</li></a>") items ++ "</ul>"
   where
-    feedItemToHtmlLink :: FeedItem -> String
-    feedItemToHtmlLink FeedItem {..} =
-      "<div class=\"title\">" ++ title ++ "</div><div class=\"domain\">" ++ getDomain link ++ " &bull; " ++ maybe "" showDay updated ++ "</div>"
+    feedItemToHtmlLink :: FeedItemWithMeta -> String
+    feedItemToHtmlLink FeedItemWithMeta {..} =
+      "<div class=\"title\">" ++ title feedItem ++ "</div><div class=\"domain\">" ++ getDomain (link feedItem) ++ " &bull; " ++ maybe "" showDay (updated feedItem) ++ "</div>"
 
-writeDigest :: Config -> (Day, Day) -> [(URL, [FeedItem])] -> IO String
+writeDigest :: Config -> (Day, Day) -> [FeedItemWithMeta] -> IO String
 writeDigest (Config {..}) (day1, day2) items = do
   let filePath = rdigestPath ++ "/digest-" ++ show day2 ++ ".html"
-  failWith DigestError $ writeFile filePath (generateDigestContent items)
+      groupedByURL = groupByURL items
+  failWith DigestError $ writeFile filePath (generateDigestContent $ sort groupedByURL)
   pure filePath
   where
-    generateDigestContent :: [(URL, [FeedItem])] -> String
+    sort =
+      sortBy (\(k1, _) (k2, _) -> compare ((getDomain . Just . fst) k1) ((getDomain . Just . fst) k2))
+    groupByURL :: [FeedItemWithMeta] -> [((URL, String), [FeedItemWithMeta])]
+    groupByURL = go []
+      where
+        go :: [((URL, String), [FeedItemWithMeta])] -> [FeedItemWithMeta] -> [((URL, String), [FeedItemWithMeta])]
+        go acc [] = acc
+        go acc (x : xs) =
+          let key = (feedURL x, feedTitle x)
+           in case lookup key acc of
+                Just ys -> go ((key, x : ys) : filter (\(k, _) -> k /= key) acc) xs
+                Nothing -> go ((key, [x]) : acc) xs
+    generateDigestContent :: [((URL, String), [FeedItemWithMeta])] -> String
     generateDigestContent xs =
       let titleReplaced = replaceDigestTitle ("Digest — " ++ dateRange ++ ":") template
           summaryReplaced = replaceDigestSummary ("There are " ++ show (Prelude.length $ concatMap snd xs) ++ " posts.") titleReplaced
@@ -478,13 +488,15 @@ writeDigest (Config {..}) (day1, day2) items = do
     wrapDate :: String -> String
     wrapDate date = "<span class=\"digest-date\">" ++ date ++ "</span>"
 
-    convertGroupToHtml :: (URL, [FeedItem]) -> String
-    convertGroupToHtml (url, xs) = "<details open><summary><h2 class=\"summary\">" ++ url ++ "</h2> (" ++ show (length xs) ++ ")</summary>" ++ feedItemsToHtml xs ++ "</details>"
+    convertGroupToHtml :: ((URL, String), [FeedItemWithMeta]) -> String
+    convertGroupToHtml ((url, feedTitle), xs) = "<details open><summary><h2 class=\"summary\">" ++ feedTitle ++ " (" ++ getDomain (Just url) ++ ")</h2> (" ++ show (length xs) ++ ")</summary>" ++ feedItemsToHtml xs ++ "</details>"
 
 getDomain :: Maybe String -> String
 getDomain url =
   let maybeURI = url >>= parseURI >>= uriAuthority
-   in maybe "" uriRegName maybeURI
+   in maybe "" (trimWWW . uriRegName) maybeURI
+  where
+    trimWWW str = if "www." `isInfixOf` str then drop 4 str else str
 
 replaceDigestContent :: String -> String -> String
 replaceDigestContent = replaceContent "{digestContent}"
@@ -565,6 +577,37 @@ newtype MultipleQueries = MultipleQueries String
 runMultipleQueries :: Connection -> MultipleQueries -> IO ()
 runMultipleQueries conn (MultipleQueries queries) = do
   let qs = filter (not . T.null) $ map T.strip $ T.splitOn (T.pack ";") (T.pack queries)
-  failWith DatabaseError $ withTransaction conn $ forM_ qs $ \q -> do
-    res <- try $ execute_ conn (fromString (T.unpack q)) :: IO (Either SomeException ())
-    print res
+  failWith DatabaseError $ withTransaction conn $ forM_ qs $ \q -> execute_ conn (fromString (T.unpack q))
+
+addTitleAndCreatedAtColumns :: MultipleQueries
+addTitleAndCreatedAtColumns = (MultipleQueries . BS.unpack) $(embedFile "./migrations/1.sql")
+
+updateTitleForFeeds :: App ()
+updateTitleForFeeds config@Config {..} = do
+  urls <- getFeedUrlsFromDB config
+  withResource connPool $ \conn -> forM_ urls $ \url -> do
+    _ <- try $ updateFeedTitle conn url :: IO (Either AppError ())
+    pure ()
+  where
+    updateFeedTitle :: Connection -> (Int, URL) -> IO ()
+    updateFeedTitle conn (feedId, url) = do
+      let q = fromString "update feeds set title = ? where id = ?;"
+      contents <- fetchUrl url
+      let title = extractTitle url contents
+      execute conn q (title, feedId)
+
+    extractTitle :: URL -> BS.ByteString -> String
+    extractTitle url contents =
+      let tags = parseTags (T.unpack $ decodeUtf8 contents)
+       in case getInnerText $ takeBetween "<title>" "</title>" tags of
+            "" -> url
+            x -> x
+
+checkIfTitleColumnExists :: App Bool
+checkIfTitleColumnExists Config {..} = failWith DatabaseError $ do
+  let q = fromString "select count(*) from pragma_table_info('feeds') where name = 'title';"
+  withResource connPool $ \conn -> do
+    res <- query_ conn q :: IO [Only Int]
+    pure $ case res of
+      [Only x] -> x > 0
+      _ -> False

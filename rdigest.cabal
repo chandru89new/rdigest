@@ -19,7 +19,7 @@ maintainer:         chandru89new@gmail.com
 -- A copyright notice.
 -- copyright:
 -- category:
-extra-doc-files: CHANGELOG.md, template.html
+extra-doc-files: CHANGELOG.md, template.html, migrations/1.sql
 
 common warnings
     ghc-options: -Wall
@@ -37,7 +37,6 @@ executable rdigest
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:      base,
-                        -- scalpel >= 0.6.1,
                         tagsoup,
                         text,
                         http-conduit,
@@ -48,7 +47,6 @@ executable rdigest
                         network-uri,
                         time,
                         file-embed,
-                        deepseq,
                         case-insensitive
     hs-source-dirs:   app
     default-language: Haskell2010
