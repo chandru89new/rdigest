@@ -62,8 +62,8 @@ main' command =
           putStrLn "Removed."
         else putStrLn "I have cancelled it."
     ListFeeds -> runApp $ \config -> do
-      feeds <- listFeeds config >>= pure . concat
-      putStrLn $ intercalate "\n" feeds
+      feeds <- listFeeds config
+      putStrLn $ intercalate "\n" (map (\(title, url) -> fromMaybe url title ++ " (" ++ url ++ ")") feeds)
     RefreshFeed url -> do
       runApp $ \config -> do
         refreshFeed url config
@@ -354,7 +354,7 @@ selectUrlFromFeeds :: Query
 selectUrlFromFeeds = fromString "SELECT id, url FROM feeds where state = 'enabled';"
 
 selectAllFeeds :: Query
-selectAllFeeds = fromString "SELECT url FROM feeds;"
+selectAllFeeds = fromString "SELECT title, url FROM feeds order by title asc;"
 
 queryToCheckIfItemExists :: Query
 queryToCheckIfItemExists = fromString "select link, title, updated from feed_items where link = ?;"
@@ -383,7 +383,6 @@ processFeed (feedId, url) (Config {..}) = do
   where
     doInserts :: Connection -> [FeedItem] -> IO [Int]
     doInserts conn = mapM (handleInsert conn)
-    -- doInserts conn feedItems = forM feedItems (handleInsert conn)
 
     handleInsert :: Connection -> FeedItem -> IO Int
     handleInsert conn feedItem = do
@@ -421,10 +420,10 @@ removeFeed url (Config {..}) =
     when (null res) $ throw $ DatabaseError "I could not find any such feed in the database. Maybe it's already gone?"
     execute conn (fromString "DELETE FROM feeds where url = ?;") (Only url)
 
-listFeeds :: App [[String]]
+listFeeds :: App [(Maybe String, String)]
 listFeeds (Config {..}) = do
   withResource connPool $ \conn -> do
-    failWith DatabaseError $ query_ conn selectAllFeeds :: IO [[String]]
+    failWith DatabaseError $ query_ conn selectAllFeeds :: IO [(Maybe String, String)]
 
 setPragmas :: Connection -> IO ()
 setPragmas = flip execute_ (fromString "PRAGMA foreign_keys = ON;")
@@ -445,9 +444,6 @@ createDigest (day1, day2) config = withResource (connPool config) $ \conn -> do
   pure $ map (\(url, feedTitle, link, title, updated) -> FeedItemWithMeta {feedItem = FeedItem {title = title, link = Just link, updated = Just updated}, feedTitle = feedTitle, feedURL = url}) xs
   where
     q = fromString "select feeds.url, feeds.title as feed_title, f.link, f.title, f.updated from feed_items f join feeds on f.feed_id = feeds.id where f.updated >= ? and f.updated <= ? order by updated DESC;"
-
-logFeedItem :: FeedItem -> IO ()
-logFeedItem FeedItem {..} = putStrLn $ title ++ "(" ++ fromMaybe "" link ++ ")"
 
 feedItemsToHtml :: [FeedItemWithMeta] -> String
 feedItemsToHtml items = "<ul>" ++ concatMap (\item@FeedItemWithMeta {..} -> "<a class=\"li\" href=\"" ++ fromMaybe "" (link feedItem) ++ "\"><li>" ++ feedItemToHtmlLink item ++ "</li></a>") items ++ "</ul>"
