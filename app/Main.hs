@@ -317,10 +317,13 @@ instance FromRow FeedId where
 
 insertFeed :: URL -> App [(Int, URL)]
 insertFeed feedUrl (Config {..}) = do
-  let q = fromString "INSERT INTO feeds (url) VALUES (?);"
-  failWith DatabaseError $ withResource connPool $ \conn -> do
-    execute conn q (Only feedUrl)
-    query conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only feedUrl)
+  let q = fromString "INSERT INTO feeds (title,url) VALUES (?,?);"
+  do
+    feedContents <- fetchUrl feedUrl
+    let title = extractTitleFromFeedUrl feedUrl feedContents
+    failWith DatabaseError $ withResource connPool $ \conn -> do
+      execute conn q (title, feedUrl)
+      query conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only feedUrl)
 
 getFeedUrlsFromDB :: App [(Int, URL)]
 getFeedUrlsFromDB (Config {..}) = failWith DatabaseError $ withResource connPool handleQuery
@@ -584,20 +587,20 @@ updateTitleForFeeds config@Config {..} = do
   withResource connPool $ \conn -> forM_ urls $ \url -> do
     _ <- try $ updateFeedTitle conn url :: IO (Either AppError ())
     pure ()
-  where
-    updateFeedTitle :: Connection -> (Int, URL) -> IO ()
-    updateFeedTitle conn (feedId, url) = do
-      let q = fromString "update feeds set title = ? where id = ?;"
-      contents <- fetchUrl url
-      let title = extractTitle url contents
-      execute conn q (title, feedId)
 
-    extractTitle :: URL -> BS.ByteString -> String
-    extractTitle url contents =
-      let tags = parseTags (T.unpack $ decodeUtf8 contents)
-       in case getInnerText $ takeBetween "<title>" "</title>" tags of
-            "" -> url
-            x -> x
+updateFeedTitle :: Connection -> (Int, URL) -> IO ()
+updateFeedTitle conn (feedId, url) = do
+  let q = fromString "update feeds set title = ? where id = ?;"
+  contents <- fetchUrl url
+  let title = extractTitleFromFeedUrl url contents
+  execute conn q (title, feedId)
+
+extractTitleFromFeedUrl :: URL -> BS.ByteString -> String
+extractTitleFromFeedUrl url contents =
+  let tags = parseTags (T.unpack $ decodeUtf8 contents)
+   in case getInnerText $ takeBetween "<title>" "</title>" tags of
+        "" -> url
+        x -> x
 
 checkIfTitleColumnExists :: App Bool
 checkIfTitleColumnExists Config {..} = failWith DatabaseError $ do
