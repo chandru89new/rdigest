@@ -16,7 +16,7 @@ import qualified Data.ByteString.Char8 as BS
 import Data.CaseInsensitive (mk)
 import Data.Either (fromLeft, fromRight, isLeft, isRight)
 import Data.FileEmbed (embedFile)
-import Data.List (intercalate, isInfixOf, sortBy)
+import Data.List (intercalate, isInfixOf, isSuffixOf, sort, sortBy)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Pool (Pool, defaultPoolConfig, destroyAllResources, newPool, withResource)
 import Data.String (IsString (fromString))
@@ -26,6 +26,7 @@ import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, formatTime, getCurr
 import Database.SQLite.Simple (Connection, FromRow (fromRow), Only (Only), Query, close, execute, execute_, field, open, query, query_, toRow, withTransaction)
 import Network.HTTP.Simple (getResponseBody, httpBS, parseRequest, setRequestHeader)
 import Network.URI (URI (uriAuthority, uriScheme), URIAuth (..), parseURI)
+import System.Directory (getDirectoryContents)
 import System.Environment (getArgs, lookupEnv)
 import System.IO (hFlush, stdout)
 import Text.HTML.TagSoup (Tag (..), fromAttrib, innerText, parseTags, partitions, (~/=), (~==))
@@ -84,9 +85,24 @@ main' command =
             putStrLn $ "I am now preparing digest for " ++ showDay today ++ ". Give me a few seconds..."
             file <- writeDigest config (today, today) items
             putStrLn $ "I have saved the digest file at " ++ file ++ "."
+            updateIndexFile config
+    CreateDayDigest argPairs -> do
+      for <- pure $ extractArgString "--for" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
+      runApp $ \config -> case for of
+        Just d -> do
+          items <- createDigest (d, d) config
+          if null items
+            then putStrLn $ "I can't create a digest for " ++ showDay d ++ ". There are no posts to make a digest out of."
+            else do
+              putStrLn $ "I am now preparing digest for " ++ showDay d ++ ". Give me a few seconds..."
+              file <- writeDigest config (d, d) items
+              putStrLn $ "I have saved the digest file at " ++ file ++ "."
+              updateIndexFile config
+        _ -> showAppError $ ArgError "I couldn't understand the date value. Provide a valid date in the YYYY-MM-DD format. Type 'rdigest help' for more information."
     CreateRangeDigest argPairs -> do
       from <- pure $ extractArgString "--from" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
       to <- pure $ extractArgString "--to" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
+      -- for <- pure $ extractArgString "--for" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
       runApp $ \config -> case (from, to) of
         (Just s, Just e) -> do
           items <- createDigest (s, e) config
@@ -96,6 +112,7 @@ main' command =
               putStrLn $ "I am now preparing digest for " ++ showDay s ++ " to " ++ showDay e ++ "..."
               file <- writeDigest config (s, e) items
               putStrLn $ "I have saved the digest file at " ++ file ++ "."
+              updateIndexFile config
         (_, _) -> showAppError $ ArgError "I couldn't understand the date range values. Provide a valid date range in the YYYY-MM-DD format. Type 'rdigest help' for more information."
     PurgeEverything -> do
       input <- userConfirmation "This will remove all feeds and all the posts associated with them."
@@ -119,6 +136,7 @@ progHelp =
   \  add <feed_url> - Add a feed. <feed_url> must be valid HTTP(S) URL.\n\
   \  remove <feed_url> - Remove a feed and all its associated posts with the given url.\n\
   \  digest - Generate the digest for today.\n\
+  \  digest --for <date> - Generate the digest for the given date. Date in the YYYY-MM-DD format.\n\
   \  digest --from <start_date> --to <end_date> - Generate the digest for a given date range. Dates in the YYYY-MM-DD format.\n\
   \  list feeds - List all feeds.\n\
   \  refresh - Refresh all feeds.\n\
@@ -134,6 +152,7 @@ data Command
   | RemoveFeed URL
   | CreateTodayDigest
   | PurgeEverything
+  | CreateDayDigest [ArgPair]
   | CreateRangeDigest [ArgPair]
   | ShowVersion
   | ShowHelp
@@ -152,6 +171,7 @@ getCommand = do
     ("refresh" : url : _) -> RefreshFeed url
     ["refresh"] -> RefreshFeeds
     ["digest"] -> CreateTodayDigest
+    ("digest" : "--for" : dayString : _) -> CreateDayDigest $ groupCommandArgs ["--for", dayString]
     ("digest" : xs) -> CreateRangeDigest $ groupCommandArgs xs
     ("purge" : _) -> PurgeEverything
     ("version" : _) -> ShowVersion
@@ -188,17 +208,18 @@ data AppError
 instance Exception AppError
 
 data Config = Config
-  {connPool :: Pool Connection, template :: String, rdigestPath :: String}
+  {connPool :: Pool Connection, template :: String, indexTemplate :: String, rdigestPath :: String}
 
 runApp :: App a -> IO ()
 runApp app = do
   let template = $(embedFile "./template.html")
+      indexTemplate = $(embedFile "./index-template.html")
   rdigestPath <- lookupEnv "RDIGEST_FOLDER"
   case rdigestPath of
     Nothing -> showAppError $ GeneralError "It looks like you have not set the RDIGEST_FOLDER env. `export RDIGEST_FOLDER=<full-path-where-rdigest-should-save-data>"
     Just rdPath -> do
       pool <- newPool (defaultPoolConfig (open (getDBFile rdPath)) close 60.0 10)
-      let config = Config {connPool = pool, template = BS.unpack template, rdigestPath = rdPath}
+      let config = Config {connPool = pool, template = BS.unpack template, rdigestPath = rdPath, indexTemplate = BS.unpack indexTemplate}
       res <- (try :: IO a -> IO (Either AppError a)) $ app config
       destroyAllResources pool
       either showAppError (const $ return ()) res
@@ -459,10 +480,10 @@ writeDigest :: Config -> (Day, Day) -> [FeedItemWithMeta] -> IO String
 writeDigest (Config {..}) (day1, day2) items = do
   let filePath = rdigestPath ++ "/digest-" ++ show day2 ++ ".html"
       groupedByURL = groupByURL items
-  failWith DigestError $ writeFile filePath (generateDigestContent $ sort groupedByURL)
+  failWith DigestError $ writeFile filePath (generateDigestContent $ sort' groupedByURL)
   pure filePath
   where
-    sort =
+    sort' =
       sortBy (\(k1, _) (k2, _) -> compare ((getDomain . Just . fst) k1) ((getDomain . Just . fst) k2))
     groupByURL :: [FeedItemWithMeta] -> [((URL, String), [FeedItemWithMeta])]
     groupByURL = go []
@@ -610,3 +631,17 @@ checkIfTitleColumnExists Config {..} = failWith DatabaseError $ do
     pure $ case res of
       [Only x] -> x > 0
       _ -> False
+
+updateIndexFile :: App ()
+updateIndexFile Config {..} = do
+  files <- getDirectoryContents rdigestPath
+  let htmlFiles = filter (\file -> isSuffixOf ".html" file && file /= "index.html") files
+      sortedHtmlFiles = reverse $ sort htmlFiles
+  indexFileContents <- generateIndexFileContent sortedHtmlFiles
+  failWith GeneralError $ writeFile (rdigestPath ++ "/index.html") indexFileContents
+  where
+    generateIndexFileContent :: [FilePath] -> IO String
+    generateIndexFileContent files = do
+      let links = map (\file -> "<li><a href=\"./" ++ file ++ "\">" ++ file ++ "</a></li>") files
+          content = "<ul>" ++ concat links ++ "</ul>"
+      pure $ replaceContent "{indexContent}" content indexTemplate
