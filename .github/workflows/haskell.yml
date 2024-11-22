@@ -2,42 +2,65 @@ name: Haskell CI
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
 
 permissions:
   contents: read
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-haskell@v1
-      with:
-        ghc-version: '9.4.8'
-        cabal-version: '3.10.3.0'
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Cache
-      uses: actions/cache@v3
-      env:
-        cache-name: cache-cabal
-      with:
-        path: ~/.cabal
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/cabal.project') }}
-        restore-keys: |
-          ${{ runner.os }}-build-${{ env.cache-name }}-
-          ${{ runner.os }}-build-
-          ${{ runner.os }}-
+      - name: Install GHCup
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl g++ libgmp-dev make # Ensure dependencies
+          curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh -s -- -y
 
-    - name: Install dependencies
-      run: |
-        cabal update
-        cabal build --disable-profiling --enable-split-sections
-    - name: Build
-      run: cabal build --disable-profiling --enable-split-sections && cabal install --overwrite-policy=always --disable-profiling --enable-split-sections
+      - name: Add GHCup to PATH
+        run: echo 'export PATH="$HOME/.ghcup/bin:$PATH"' >> $GITHUB_ENV
+
+      - name: Install Latest GHC and Cabal
+        run: |
+          source ~/.ghcup/env # Load GHCup environment
+          ghcup install ghc latest # Install the latest GHC
+          ghcup set ghc latest     # Set the latest GHC as default
+          ghcup install cabal 3.10.3.0 # Install Cabal version 3.10.3.0
+          ghcup set cabal 3.10.3.0     # Set Cabal 3.10.3.0 as default
+
+      - name: Update Cabal Dependencies
+        run: |
+          source ~/.ghcup/env
+          cabal update
+          cabal build --disable-profiling --enable-split-sections
+
+      - name: Build Binary
+        run: |
+          source ~/.ghcup/env
+          cabal install --overwrite-policy=always --disable-profiling --enable-split-sections
+
+      - name: Create Release
+        if: false
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v0.1.0
+          release_name: Release v0.1.0
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        if: false
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./release/<your-binary-name>
+          asset_name: <your-binary-name>
+          asset_content_type: application/octet-stream
