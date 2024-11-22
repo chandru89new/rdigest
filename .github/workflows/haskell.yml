@@ -68,7 +68,7 @@ jobs:
 
       - name: Reduce binary size
         run: |
-          strip ./release/rdigest
+          strip $(readlink ./release/rdigest)
           sudo apt install upx -y
           upx $(readlink ./release/rdigest)
 
