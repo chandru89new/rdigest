@@ -12,8 +12,8 @@ on:
         required: true
         default: "3.10.3.0"
 
-# permissions:
-#   contents: write-all
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -68,6 +68,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./release/<your-binary-name>
-          asset_name: <your-binary-name>
+          asset_path: ./release/rdigest
+          asset_name: rdigest
           asset_content_type: application/octet-stream
