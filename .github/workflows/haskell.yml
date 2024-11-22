@@ -11,6 +11,10 @@ on:
         description: "Cabal version to install"
         required: true
         default: "3.10.3.0"
+      version:
+        description: "Release version"
+        required: true
+        default: "v0.1.0"
 
 permissions:
   contents: write
@@ -51,14 +55,20 @@ jobs:
           source ~/.ghcup/env
           cabal install --overwrite-policy=always --disable-profiling --enable-split-sections --installdir=./release
 
+      - name: Reduce binary size
+        run: |
+          strip ./release/rdigest
+          sudo apt install upx -y
+          upx ./release/rdigest
+
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v0.1.0
-          release_name: Release v0.1.0
+          tag_name: ${{ inputs.version }}
+          release_name: Release ${{ inputs.version }}
           draft: false
           prerelease: false
 
