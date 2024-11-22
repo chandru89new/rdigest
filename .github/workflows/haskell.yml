@@ -52,7 +52,6 @@ jobs:
           cabal install --overwrite-policy=always --disable-profiling --enable-split-sections --installdir=./release
 
       - name: Create Release
-        if: false
         id: create_release
         uses: actions/create-release@v1
         env:
@@ -64,7 +63,6 @@ jobs:
           prerelease: false
 
       - name: Upload Release Asset
-        if: false
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
