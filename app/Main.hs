@@ -478,7 +478,8 @@ feedItemsToHtml items = "<ul>" ++ concatMap (\item@FeedItemWithMeta {..} -> "<a 
 
 writeDigest :: Config -> (Day, Day) -> [FeedItemWithMeta] -> IO String
 writeDigest (Config {..}) (day1, day2) items = do
-  let filePath = rdigestPath ++ "/digest-" ++ show day2 ++ ".html"
+  let fileName = if day1 == day2 then show day2 else show day1 ++ "-" ++ show day2
+      filePath = rdigestPath ++ "/digest-" ++ fileName ++ ".html"
       groupedByURL = groupByURL items
   failWith DigestError $ writeFile filePath (generateDigestContent $ sort' groupedByURL)
   pure filePath
