@@ -2,6 +2,15 @@ name: Haskell CI
 
 on:
   workflow_dispatch:
+    inputs:
+      ghc_version:
+        description: "GHC version to install"
+        required: true
+        default: "9.4.8"
+      cabal_version:
+        description: "Cabal version to install"
+        required: true
+        default: "3.10.3.0"
 
 permissions:
   contents: read
@@ -25,11 +34,11 @@ jobs:
 
       - name: Install Latest GHC and Cabal
         run: |
-          source ~/.ghcup/env # Load GHCup environment
-          ghcup install ghc latest # Install the latest GHC
-          ghcup set ghc latest     # Set the latest GHC as default
-          ghcup install cabal 3.10.3.0 # Install Cabal version 3.10.3.0
-          ghcup set cabal 3.10.3.0     # Set Cabal 3.10.3.0 as default
+          source ~/.ghcup/env
+          ghcup install ghc ${{ inputs.ghc_version }}
+          ghcup set ghc ${{ inputs.ghc_version }}
+          ghcup install cabal ${{ inputs.cabal_version }}
+          ghcup set cabal ${{ inputs.cabal_version }}
 
       - name: Update Cabal Dependencies
         run: |
@@ -40,7 +49,7 @@ jobs:
       - name: Build Binary
         run: |
           source ~/.ghcup/env
-          cabal install --overwrite-policy=always --disable-profiling --enable-split-sections
+          cabal install --overwrite-policy=always --disable-profiling --enable-split-sections --installdir=./release
 
       - name: Create Release
         if: false
