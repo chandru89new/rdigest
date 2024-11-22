@@ -59,7 +59,7 @@ jobs:
         run: |
           strip ./release/rdigest
           sudo apt install upx -y
-          upx ./release/rdigest
+          upx $(readlink ./release/rdigest)
 
       - name: Create Release
         id: create_release
