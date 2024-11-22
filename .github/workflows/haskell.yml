@@ -44,6 +44,17 @@ jobs:
           ghcup install cabal ${{ inputs.cabal_version }}
           ghcup set cabal ${{ inputs.cabal_version }}
 
+      # Restore Cabal cache
+      - name: Restore Cabal Cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cabal/store
+            ~/.ghc
+          key: ${{ runner.os }}-cabal-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/cabal.project') }}
+          restore-keys: |
+            ${{ runner.os }}-cabal-
+
       - name: Update Cabal Dependencies
         run: |
           source ~/.ghcup/env
