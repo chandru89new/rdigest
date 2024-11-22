@@ -12,8 +12,8 @@ on:
         required: true
         default: "3.10.3.0"
 
-permissions:
-  contents: read
+# permissions:
+#   contents: write-all
 
 jobs:
   build:
