@@ -22,7 +22,7 @@ import Data.Pool (Pool, defaultPoolConfig, destroyAllResources, newPool, withRes
 import Data.String (IsString (fromString))
 import qualified Data.Text as T (Text, null, pack, replace, splitOn, strip, unpack)
 import Data.Text.Encoding (decodeUtf8)
-import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, formatTime, getCurrentTime, parseTimeM)
+import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, formatTime, parseTimeM)
 import Database.SQLite.Simple (Connection, FromRow (fromRow), Only (Only), Query, close, execute, execute_, field, open, query, query_, toRow, withTransaction)
 import Network.HTTP.Simple (getResponseBody, httpBS, parseRequest, setRequestHeader)
 import Network.URI (URI (uriAuthority, uriScheme), URIAuth (..), parseURI)
@@ -69,50 +69,36 @@ main' command =
       runApp $ \config -> do
         refreshFeed url config
         putStrLn "I have refreshed the feed."
-        main' CreateTodayDigest
+        main' UpdateAllDigests
     RefreshFeeds -> do
       runApp $ \config -> do
         _ <- updateAllFeeds config
         putStrLn "I have refreshed all the feeds."
-        main' CreateTodayDigest
-    CreateTodayDigest -> do
-      today <- fmap utctDay getCurrentTime
+        main' UpdateAllDigests
+    UpdateAllDigests -> do
       runApp $ \config -> do
-        items <- createDigest (today, today) config
-        if null items
-          then putStrLn $ "I can't create a digest for " ++ showDay today ++ ". There are no posts to make a digest out of."
-          else do
-            putStrLn $ "I am now preparing digest for " ++ showDay today ++ ". Give me a few seconds..."
-            file <- writeDigest config (today, today) items
-            putStrLn $ "I have saved the digest file at " ++ file ++ "."
-            updateIndexFile config
+        updateAllDigests config
+        updateIndexFile config
     CreateDayDigest argPairs -> do
       for <- pure $ extractArgString "--for" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
       runApp $ \config -> case for of
         Just d -> do
-          items <- createDigest (d, d) config
+          items <- createDigest d config
           if null items
             then putStrLn $ "I can't create a digest for " ++ showDay d ++ ". There are no posts to make a digest out of."
             else do
               putStrLn $ "I am now preparing digest for " ++ showDay d ++ ". Give me a few seconds..."
-              file <- writeDigest config (d, d) items
+              file <- writeDigest config d items
               putStrLn $ "I have saved the digest file at " ++ file ++ "."
               updateIndexFile config
         _ -> showAppError $ ArgError "I couldn't understand the date value. Provide a valid date in the YYYY-MM-DD format. Type 'rdigest help' for more information."
     CreateRangeDigest argPairs -> do
       from <- pure $ extractArgString "--from" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
       to <- pure $ extractArgString "--to" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
-      -- for <- pure $ extractArgString "--for" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
-      runApp $ \config -> case (from, to) of
-        (Just s, Just e) -> do
-          items <- createDigest (s, e) config
-          if null items
-            then putStrLn "There are not posts in the given range to make a digest."
-            else do
-              putStrLn $ "I am now preparing digest for " ++ showDay s ++ " to " ++ showDay e ++ "..."
-              file <- writeDigest config (s, e) items
-              putStrLn $ "I have saved the digest file at " ++ file ++ "."
-              updateIndexFile config
+      case (from, to) of
+        (Just s, Just e) -> runApp $ \config -> do
+          createDigestForDateRange s e config
+          updateIndexFile config
         (_, _) -> showAppError $ ArgError "I couldn't understand the date range values. Provide a valid date range in the YYYY-MM-DD format. Type 'rdigest help' for more information."
     PurgeEverything -> do
       input <- userConfirmation "This will remove all feeds and all the posts associated with them."
@@ -135,9 +121,9 @@ progHelp =
   \  version - Show version info.\n\
   \  add <feed_url> - Add a feed. <feed_url> must be valid HTTP(S) URL.\n\
   \  remove <feed_url> - Remove a feed and all its associated posts with the given url.\n\
-  \  digest - Generate the digest for today.\n\
+  \  digest - Generate/update all daily digests.\n\
   \  digest --for <date> - Generate the digest for the given date. Date in the YYYY-MM-DD format.\n\
-  \  digest --from <start_date> --to <end_date> - Generate the digest for a given date range. Dates in the YYYY-MM-DD format.\n\
+  \  digest --from <start_date> --to <end_date> - Generate digests for each day (one digest per day) in the given date range. It only generates digests for dates for which posts exists in the database. Dates in the YYYY-MM-DD format.\n\
   \  list feeds - List all feeds.\n\
   \  refresh - Refresh all feeds.\n\
   \  refresh <feed_url> - Refresh feed at <feed_url>. The <feed_url> must already be in your database.\n\
@@ -150,7 +136,7 @@ data Command
   | RefreshFeeds
   | ListFeeds
   | RemoveFeed URL
-  | CreateTodayDigest
+  | UpdateAllDigests
   | PurgeEverything
   | CreateDayDigest [ArgPair]
   | CreateRangeDigest [ArgPair]
@@ -170,7 +156,7 @@ getCommand = do
     ("list" : "feeds" : _) -> ListFeeds
     ("refresh" : url : _) -> RefreshFeed url
     ["refresh"] -> RefreshFeeds
-    ["digest"] -> CreateTodayDigest
+    ["digest"] -> UpdateAllDigests
     ("digest" : "--for" : dayString : _) -> CreateDayDigest $ groupCommandArgs ["--for", dayString]
     ("digest" : xs) -> CreateRangeDigest $ groupCommandArgs xs
     ("purge" : _) -> PurgeEverything
@@ -462,12 +448,12 @@ userConfirmation msg = do
 
 data FeedItemWithMeta = FeedItemWithMeta {feedItem :: FeedItem, feedTitle :: String, feedURL :: URL} deriving (Show)
 
-createDigest :: (Day, Day) -> App [FeedItemWithMeta]
-createDigest (day1, day2) config = withResource (connPool config) $ \conn -> do
-  xs <- failWith DatabaseError $ query conn q (day1, day2) :: IO [(String, String, String, String, Day)]
+createDigest :: Day -> App [FeedItemWithMeta]
+createDigest day config = withResource (connPool config) $ \conn -> do
+  xs <- failWith DatabaseError $ query conn q (Only day) :: IO [(String, String, String, String, Day)]
   pure $ map (\(url, feedTitle, link, title, updated) -> FeedItemWithMeta {feedItem = FeedItem {title = title, link = Just link, updated = Just updated}, feedTitle = feedTitle, feedURL = url}) xs
   where
-    q = fromString "select feeds.url, feeds.title as feed_title, f.link, f.title, f.updated from feed_items f join feeds on f.feed_id = feeds.id where f.updated >= ? and f.updated <= ? order by updated DESC;"
+    q = fromString "select feeds.url, feeds.title as feed_title, f.link, f.title, f.updated from feed_items f join feeds on f.feed_id = feeds.id where f.updated = ?;"
 
 feedItemsToHtml :: [FeedItemWithMeta] -> String
 feedItemsToHtml items = "<ul>" ++ concatMap (\item@FeedItemWithMeta {..} -> "<a class=\"li\" href=\"" ++ fromMaybe "" (link feedItem) ++ "\"><li>" ++ feedItemToHtmlLink item ++ "</li></a>") items ++ "</ul>"
@@ -476,9 +462,9 @@ feedItemsToHtml items = "<ul>" ++ concatMap (\item@FeedItemWithMeta {..} -> "<a 
     feedItemToHtmlLink FeedItemWithMeta {..} =
       "<div class=\"title\">" ++ title feedItem ++ "</div><div class=\"domain\">" ++ getDomain (link feedItem) ++ " &bull; " ++ maybe "" showDay (updated feedItem) ++ "</div>"
 
-writeDigest :: Config -> (Day, Day) -> [FeedItemWithMeta] -> IO String
-writeDigest (Config {..}) (day1, day2) items = do
-  let fileName = if day1 == day2 then show day2 else show day1 ++ "-" ++ show day2
+writeDigest :: Config -> Day -> [FeedItemWithMeta] -> IO String
+writeDigest (Config {..}) day items = do
+  let fileName = show day
       filePath = rdigestPath ++ "/digest-" ++ fileName ++ ".html"
       groupedByURL = groupByURL items
   failWith DigestError $ writeFile filePath (generateDigestContent $ sort' groupedByURL)
@@ -498,13 +484,10 @@ writeDigest (Config {..}) (day1, day2) items = do
                 Nothing -> go ((key, [x]) : acc) xs
     generateDigestContent :: [((URL, String), [FeedItemWithMeta])] -> String
     generateDigestContent xs =
-      let titleReplaced = replaceDigestTitle ("Digest — " ++ dateRange ++ ":") template
+      let titleReplaced = replaceDigestTitle ("Digest — " ++ wrapDate (show day) ++ ":") template
           summaryReplaced = replaceDigestSummary ("There are " ++ show (Prelude.length $ concatMap snd xs) ++ " posts.") titleReplaced
           contentReplaced = replaceDigestContent (concatMap convertGroupToHtml xs) summaryReplaced
        in contentReplaced
-
-    dateRange :: String
-    dateRange = if day1 == day2 then wrapDate (showDay day2) else wrapDate (showDay day1) ++ " to " ++ wrapDate (showDay day2)
 
     wrapDate :: String -> String
     wrapDate date = "<span class=\"digest-date\">" ++ date ++ "</span>"
@@ -646,3 +629,36 @@ updateIndexFile Config {..} = do
       let links = map (\file -> "<li><a href=\"./" ++ file ++ "\">" ++ file ++ "</a></li>") files
           content = "<ul>" ++ concat links ++ "</ul>"
       pure $ replaceContent "{indexContent}" content indexTemplate
+
+createDigestForDateRange :: Day -> Day -> App ()
+createDigestForDateRange start end config = do
+  dates <- getValidDatesBetween start end config
+  forM_ dates $ \(_, date) -> do
+    items <- try $ createDigest date config :: IO (Either AppError [FeedItemWithMeta])
+    case items of
+      Left e -> showAppError e
+      Right xs ->
+        if null xs
+          then putStrLn $ "I can't create a digest for " ++ showDay date ++ ". There are no posts to make a digest out of."
+          else do
+            putStrLn $ "I am now preparing digest for " ++ showDay date ++ ". Give me a few seconds..."
+            file <- writeDigest config date xs
+            putStrLn $ "I have saved the digest file at " ++ file ++ "."
+
+updateAllDigests :: App ()
+updateAllDigests config@Config {..} = do
+  let minDateQuery = fromString "select min(distinct(updated)) from feed_items;"
+      maxDateQuery = fromString "select max(distinct(updated)) from feed_items;"
+  withResource connPool $ \conn ->
+    failWith DatabaseError $ do
+      minDate <- query_ conn minDateQuery :: IO [Only Day]
+      maxDate <- query_ conn maxDateQuery :: IO [Only Day]
+      case (minDate, maxDate) of
+        ([Only minD], [Only maxD]) -> createDigestForDateRange minD maxD config
+        _ -> putStrLn "I couldn't find any posts in the database."
+
+getValidDatesBetween :: Day -> Day -> App [(Int, Day)]
+getValidDatesBetween start end Config {..} = do
+  let queryToGetDates = fromString "select count(updated), updated from feed_items where updated >= ? and updated <= ? group by updated order by updated desc;"
+  withResource connPool $ \conn -> do
+    failWith DatabaseError $ query conn queryToGetDates (start, end) :: IO [(Int, Day)]
