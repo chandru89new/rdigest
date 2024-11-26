@@ -633,7 +633,7 @@ updateIndexFile Config {..} = do
 createDigestForDateRange :: Day -> Day -> App ()
 createDigestForDateRange start end config = do
   dates <- getValidDatesBetween start end config
-  forM_ dates $ \(_, date) -> do
+  forM_ dates $ \date -> do
     items <- try $ createDigest date config :: IO (Either AppError [FeedItemWithMeta])
     case items of
       Left e -> showAppError e
@@ -657,8 +657,9 @@ updateAllDigests config@Config {..} = do
         ([Only minD], [Only maxD]) -> createDigestForDateRange minD maxD config
         _ -> putStrLn "I couldn't find any posts in the database."
 
-getValidDatesBetween :: Day -> Day -> App [(Int, Day)]
+getValidDatesBetween :: Day -> Day -> App [Day]
 getValidDatesBetween start end Config {..} = do
   let queryToGetDates = fromString "select count(updated), updated from feed_items where updated >= ? and updated <= ? group by updated order by updated desc;"
   withResource connPool $ \conn -> do
-    failWith DatabaseError $ query conn queryToGetDates (start, end) :: IO [(Int, Day)]
+    days <- failWith DatabaseError $ query conn queryToGetDates (start, end) :: IO [(Int, Day)]
+    pure $ map snd days
