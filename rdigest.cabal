@@ -30,11 +30,7 @@ executable rdigest
     import:           warnings
     main-is:          Main.hs
 
-    -- Modules included in this executable, other than Main.
-    -- other-modules:  FetchChannelsList,
-    --                 GenerateRssList
     other-modules:     Paths_rdigest
-    -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:      base,
                         tagsoup,
@@ -51,5 +47,4 @@ executable rdigest
                         directory
     hs-source-dirs:   app
     default-language: Haskell2010
-    -- ghc-options: -rtsopts=none -threaded -split-sections -Wall -Wincomplete-patterns
     ghc-options: -Wall -Wincomplete-patterns

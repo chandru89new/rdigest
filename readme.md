@@ -60,4 +60,5 @@ Make sure you set up an `RDIGEST_FOLDER` environment variable before you use `rd
 ## Roadmap
 
 - [ ] spin up a server, for a UI-driven rdigest
-- [ ] create pre-built binaries for Mac and Linux for release
+- [x] create pre-built binaries for Linux for release
+- [ ] create pre-built binaries for Mac for release
