@@ -108,7 +108,7 @@ main' command =
           _ <- runApp destroyDB
           putStrLn "Fin."
         else putStrLn "I have cancelled it."
-    ShowVersion -> putStrLn "rdigest v0.1.0"
+    ShowVersion -> putStrLn "rdigest v0.1.3"
     ShowHelp -> putStrLn progHelp
     InvalidCommand -> do
       putStrLn "I could not recognize that command. Try `rdigest help`."
