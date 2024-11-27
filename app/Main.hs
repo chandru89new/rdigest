@@ -23,9 +23,11 @@ import Data.String (IsString (fromString))
 import qualified Data.Text as T (Text, null, pack, replace, splitOn, strip, unpack)
 import Data.Text.Encoding (decodeUtf8)
 import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, formatTime, parseTimeM)
+import Data.Version (showVersion)
 import Database.SQLite.Simple (Connection, FromRow (fromRow), Only (Only), Query, close, execute, execute_, field, open, query, query_, toRow, withTransaction)
 import Network.HTTP.Simple (getResponseBody, httpBS, parseRequest, setRequestHeader)
 import Network.URI (URI (uriAuthority, uriScheme), URIAuth (..), parseURI)
+import Paths_rdigest (version)
 import System.Directory (getDirectoryContents)
 import System.Environment (getArgs, lookupEnv)
 import System.IO (hFlush, stdout)
@@ -108,7 +110,7 @@ main' command =
           _ <- runApp destroyDB
           putStrLn "Fin."
         else putStrLn "I have cancelled it."
-    ShowVersion -> putStrLn "rdigest v0.1.3"
+    ShowVersion -> putStrLn ("rdigest " ++ showVersion version)
     ShowHelp -> putStrLn progHelp
     InvalidCommand -> do
       putStrLn "I could not recognize that command. Try `rdigest help`."
