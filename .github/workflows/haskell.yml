@@ -11,10 +11,6 @@ on:
         description: "Cabal version to install"
         required: true
         default: "3.10.3.0"
-      version:
-        description: "Release version"
-        required: true
-        default: "v0.1.0"
 
 permissions:
   contents: write
@@ -72,14 +68,19 @@ jobs:
           sudo apt install upx -y
           upx $(readlink ./release/rdigest)
 
+      - name: Get Version
+        id: get_version
+        run: |
+          echo "version=$(./release/rdigest version | awk '{print $2}')" >> $GITHUB_OUTPUT
+
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ inputs.version }}
-          release_name: Release ${{ inputs.version }}
+          tag_name: ${{ steps.get_version.outputs.version }}
+          release_name: Release ${{ steps.get_version.outputs.version }}
           draft: false
           prerelease: false
 
