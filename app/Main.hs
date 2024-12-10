@@ -33,6 +33,60 @@ import System.Environment (getArgs, lookupEnv)
 import System.IO (hFlush, stdout)
 import Text.HTML.TagSoup (Tag (..), fromAttrib, innerText, parseTags, partitions, (~/=), (~==))
 
+type URL = String
+
+data Command
+  = Init
+  | AddFeed URL
+  | RefreshFeed URL
+  | RefreshFeeds
+  | ListFeeds
+  | RemoveFeed URL
+  | UpdateAllDigests
+  | PurgeEverything
+  | CreateDayDigest [ArgPair]
+  | CreateRangeDigest [ArgPair]
+  | ShowVersion
+  | ShowHelp
+  | InvalidCommand
+  deriving (Eq)
+
+data AppError
+  = FetchError String
+  | DatabaseError String
+  | FeedParseError String
+  | ArgError String
+  | DigestError String
+  | GeneralError String
+  deriving (Show)
+
+data Config = Config
+  {connPool :: Pool Connection, template :: String, indexTemplate :: String, rdigestPath :: String}
+
+data FeedItem = FeedItem {title :: String, link :: Maybe String, updated :: Maybe Day} deriving (Eq, Show)
+
+data Feed = Feed {url :: String, name :: String} deriving (Show)
+
+newtype FeedId = FeedId Int deriving (Show)
+
+type App a = Config -> IO a
+
+data FeedItemWithMeta = FeedItemWithMeta {feedItem :: FeedItem, feedTitle :: String, feedURL :: URL} deriving (Show)
+
+type ArgPair = (String, ArgVal)
+
+data ArgVal = ArgBool Bool | ArgString String deriving (Eq, Show)
+
+newtype MultipleQueries = MultipleQueries String
+
+instance Exception AppError
+
+instance FromRow FeedItem where
+  fromRow = FeedItem <$> field <*> field <*> field
+
+instance FromRow FeedId where
+  fromRow = FeedId <$> field
+
 main :: IO ()
 main = do
   command <- getCommand
@@ -131,22 +185,6 @@ progHelp =
   \  refresh <feed_url> - Refresh feed at <feed_url>. The <feed_url> must already be in your database.\n\
   \  purge - Purge everything.\n"
 
-data Command
-  = Init
-  | AddFeed URL
-  | RefreshFeed URL
-  | RefreshFeeds
-  | ListFeeds
-  | RemoveFeed URL
-  | UpdateAllDigests
-  | PurgeEverything
-  | CreateDayDigest [ArgPair]
-  | CreateRangeDigest [ArgPair]
-  | ShowVersion
-  | ShowHelp
-  | InvalidCommand
-  deriving (Eq)
-
 getCommand :: IO Command
 getCommand = do
   args <- getArgs
@@ -182,41 +220,18 @@ fetchUrl url = failWith FetchError $ do
   let withHeader = setRequestHeader (mk $ BS.pack "User-Agent") [BS.pack "Mozilla/5.0"] req
   httpBS withHeader >>= pure . getResponseBody
 
-type App a = Config -> IO a
-
-data AppError
-  = FetchError String
-  | DatabaseError String
-  | FeedParseError String
-  | ArgError String
-  | DigestError String
-  | GeneralError String
-  deriving (Show)
-
-instance Exception AppError
-
-data Config = Config
-  {connPool :: Pool Connection, template :: String, indexTemplate :: String, rdigestPath :: String}
-
-runApp :: App a -> IO ()
-runApp app = do
-  let template = $(embedFile "./template.html")
-      indexTemplate = $(embedFile "./index-template.html")
-  rdigestPath <- lookupEnv "RDIGEST_FOLDER"
-  case rdigestPath of
-    Nothing -> showAppError $ GeneralError "It looks like you have not set the RDIGEST_FOLDER env. `export RDIGEST_FOLDER=<full-path-where-rdigest-should-save-data>"
-    Just rdPath -> do
-      pool <- newPool (defaultPoolConfig (open (getDBFile rdPath)) close 60.0 10)
-      let config = Config {connPool = pool, template = BS.unpack template, rdigestPath = rdPath, indexTemplate = BS.unpack indexTemplate}
-      res <- (try :: IO a -> IO (Either AppError a)) $ app config
-      destroyAllResources pool
-      either showAppError (const $ return ()) res
-
-trim :: String -> String
-trim = T.unpack . T.strip . T.pack
-
-getInnerText :: [Tag String] -> String
-getInnerText = trim . innerText
+extractFeedItems :: BS.ByteString -> Maybe [FeedItem]
+extractFeedItems = parseContents
+  where
+    parseContents c =
+      let tags = parseTags (T.unpack $ decodeUtf8 c)
+          entryTags = partitions (~== "<entry>") tags -- this is for youtube feeds only
+          itemTags = partitions (~== "<item>") tags
+       in case (itemTags, entryTags) of
+            ([], []) -> Nothing
+            (xs, []) -> Just $ map extractFeedItem xs
+            ([], ys) -> Just $ map extractFeedItem ys
+            (xs, ys) -> Just $ map extractFeedItem (xs ++ ys)
 
 extractFeedItem :: [Tag String] -> FeedItem
 extractFeedItem tags =
@@ -244,69 +259,6 @@ extractBetweenTag tag tags =
 takeBetween :: String -> String -> [Tag String] -> [Tag String]
 takeBetween start end tags = takeWhile (~/= end) $ dropWhile (~/= start) tags
 
-type URL = String
-
-extractFeedItems :: BS.ByteString -> Maybe [FeedItem]
-extractFeedItems = parseContents
-  where
-    parseContents c =
-      let tags = parseTags (T.unpack $ decodeUtf8 c)
-          entryTags = partitions (~== "<entry>") tags -- this is for youtube feeds only
-          itemTags = partitions (~== "<item>") tags
-       in case (itemTags, entryTags) of
-            ([], []) -> Nothing
-            (xs, []) -> Just $ map extractFeedItem xs
-            ([], ys) -> Just $ map extractFeedItem ys
-            (xs, ys) -> Just $ map extractFeedItem (xs ++ ys)
-
-data FeedItem = FeedItem {title :: String, link :: Maybe String, updated :: Maybe Day} deriving (Eq, Show)
-
-data Feed = Feed {url :: String, name :: String} deriving (Show)
-
-parseDate :: String -> Maybe Day
-parseDate datetime = fmap utctDay $ firstJust $ map tryParse [fmt1, fmt2, fmt3, fmt4, fmt5, fmt6]
-  where
-    fmt1 = "%Y-%m-%dT%H:%M:%S%z"
-    fmt2 = "%a, %d %b %Y %H:%M:%S %z"
-    fmt3 = "%a, %d %b %Y %H:%M:%S %Z"
-    fmt4 = "%Y-%m-%dT%H:%M:%S%Z"
-    fmt5 = "%Y-%m-%dT%H:%M:%S%Q%z"
-    fmt6 = "%Y-%m-%dT%H:%M:%S%Q%Z"
-    tryParse fmt = parseTimeM True defaultTimeLocale fmt datetime :: Maybe UTCTime
-    firstJust :: [Maybe a] -> Maybe a
-    firstJust xs = go xs Nothing
-      where
-        go [] acc = acc
-        go (x : xs_) acc = case x of
-          Just y -> Just y
-          Nothing -> go xs_ acc
-
-justRunQuery :: Connection -> Query -> IO ()
-justRunQuery conn q = do
-  _ <- failWith DatabaseError $ execute_ conn q
-  pure ()
-
-initializeTables :: Connection -> IO ()
-initializeTables conn = do
-  _ <- justRunQuery conn createFeedsTable
-  justRunQuery conn createFeedItemsTable
-
-initDB :: App ()
-initDB config@(Config {..}) = do
-  withResource
-    connPool
-    ( \conn -> do
-        _ <- setPragmas conn
-        initializeTables conn
-    )
-  titleExists <- checkIfTitleColumnExists config
-  if titleExists
-    then pure ()
-    else do
-      putStrLn "Updating the database..."
-      withResource connPool $ \conn -> runMultipleQueries conn addTitleAndCreatedAtColumns
-      updateTitleForFeeds config
-
 insertFeedItem :: Connection -> (Int, FeedItem) -> IO (Maybe FeedItem)
 insertFeedItem conn (feedId, feedItem@FeedItem {..}) = do
   rows <- failWith DatabaseError $ query conn queryToCheckIfItemExists (Only link) :: IO [FeedItem]
@@ -315,14 +267,6 @@ insertFeedItem conn (feedId, feedItem@FeedItem {..}) = do
     _ -> do
       _ <- failWith DatabaseError $ execute conn insertFeedQuery $ toRow (title, link, updated, feedId) :: IO ()
       pure (Just feedItem)
-
-instance FromRow FeedItem where
-  fromRow = FeedItem <$> field <*> field <*> field
-
-newtype FeedId = FeedId Int deriving (Show)
-
-instance FromRow FeedId where
-  fromRow = FeedId <$> field
 
 insertFeed :: URL -> App [(Int, URL)]
 insertFeed feedUrl (Config {..}) = do
@@ -448,8 +392,6 @@ userConfirmation msg = do
   input <- getLine
   pure $ input == "y" || input == "Y"
 
-data FeedItemWithMeta = FeedItemWithMeta {feedItem :: FeedItem, feedTitle :: String, feedURL :: URL} deriving (Show)
-
 createDigest :: Day -> App [FeedItemWithMeta]
 createDigest day config = withResource (connPool config) $ \conn -> do
   xs <- failWith DatabaseError $ query conn q (Only day) :: IO [(String, String, String, String, Day)]
@@ -526,10 +468,6 @@ replaceSmartQuotes =
     . T.replace (T.pack "‘") (T.pack "'")
     . T.replace (T.pack "’") (T.pack "'")
 
-type ArgPair = (String, ArgVal)
-
-data ArgVal = ArgBool Bool | ArgString String deriving (Eq, Show)
-
 groupCommandArgs :: [String] -> [ArgPair]
 groupCommandArgs = go []
   where
@@ -577,8 +515,6 @@ refreshFeed url config@Config {..} = do
 
 getDBFile :: String -> String
 getDBFile = (++ "/rdigest.db")
-
-newtype MultipleQueries = MultipleQueries String
 
 runMultipleQueries :: Connection -> MultipleQueries -> IO ()
 runMultipleQueries conn (MultipleQueries queries) = do
@@ -665,3 +601,67 @@ getValidDatesBetween start end Config {..} = do
   withResource connPool $ \conn -> do
     days <- failWith DatabaseError $ query conn queryToGetDates (start, end) :: IO [(Int, Day)]
     pure $ map snd days
+
+parseDate :: String -> Maybe Day
+parseDate datetime = fmap utctDay $ firstJust $ map tryParse [fmt1, fmt2, fmt3, fmt4, fmt5, fmt6]
+  where
+    fmt1 = "%Y-%m-%dT%H:%M:%S%z"
+    fmt2 = "%a, %d %b %Y %H:%M:%S %z"
+    fmt3 = "%a, %d %b %Y %H:%M:%S %Z"
+    fmt4 = "%Y-%m-%dT%H:%M:%S%Z"
+    fmt5 = "%Y-%m-%dT%H:%M:%S%Q%z"
+    fmt6 = "%Y-%m-%dT%H:%M:%S%Q%Z"
+    tryParse fmt = parseTimeM True defaultTimeLocale fmt datetime :: Maybe UTCTime
+    firstJust :: [Maybe a] -> Maybe a
+    firstJust xs = go xs Nothing
+      where
+        go [] acc = acc
+        go (x : xs_) acc = case x of
+          Just y -> Just y
+          Nothing -> go xs_ acc
+
+justRunQuery :: Connection -> Query -> IO ()
+justRunQuery conn q = do
+  _ <- failWith DatabaseError $ execute_ conn q
+  pure ()
+
+initializeTables :: Connection -> IO ()
+initializeTables conn = do
+  _ <- justRunQuery conn createFeedsTable
+  justRunQuery conn createFeedItemsTable
+
+initDB :: App ()
+initDB config@(Config {..}) = do
+  withResource
+    connPool
+    ( \conn -> do
+        _ <- setPragmas conn
+        initializeTables conn
+    )
+  titleExists <- checkIfTitleColumnExists config
+  if titleExists
+    then pure ()
+    else do
+      putStrLn "Updating the database..."
+      withResource connPool $ \conn -> runMultipleQueries conn addTitleAndCreatedAtColumns
+      updateTitleForFeeds config
+
+runApp :: App a -> IO ()
+runApp app = do
+  let template = $(embedFile "./template.html")
+      indexTemplate = $(embedFile "./index-template.html")
+  rdigestPath <- lookupEnv "RDIGEST_FOLDER"
+  case rdigestPath of
+    Nothing -> showAppError $ GeneralError "It looks like you have not set the RDIGEST_FOLDER env. `export RDIGEST_FOLDER=<full-path-where-rdigest-should-save-data>"
+    Just rdPath -> do
+      pool <- newPool (defaultPoolConfig (open (getDBFile rdPath)) close 60.0 10)
+      let config = Config {connPool = pool, template = BS.unpack template, rdigestPath = rdPath, indexTemplate = BS.unpack indexTemplate}
+      res <- (try :: IO a -> IO (Either AppError a)) $ app config
+      destroyAllResources pool
+      either showAppError (const $ return ()) res
+
+trim :: String -> String
+trim = T.unpack . T.strip . T.pack
+
+getInnerText :: [Tag String] -> String
+getInnerText = trim . innerText
