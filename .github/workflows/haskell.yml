@@ -55,18 +55,16 @@ jobs:
         run: |
           source ~/.ghcup/env
           cabal update
-          cabal build --disable-profiling --enable-split-sections
 
       - name: Build Binary
         run: |
           source ~/.ghcup/env
-          cabal install --overwrite-policy=always --disable-profiling --enable-split-sections --installdir=./release
+          make clean-build
 
       - name: Reduce binary size
         run: |
-          strip $(readlink ./release/rdigest)
           sudo apt install upx -y
-          upx $(readlink ./release/rdigest)
+          upx $(readlink -f ./release/rdigest)
 
       - name: Get Version
         id: get_version
@@ -79,7 +77,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.get_version.outputs.version }}
+          tag_name: v${{ steps.get_version.outputs.version }}
           release_name: Release v${{ steps.get_version.outputs.version }}
           draft: false
           prerelease: false
