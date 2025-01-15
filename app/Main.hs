@@ -437,7 +437,7 @@ writeDigest (Config {..}) day items = do
     wrapDate date = "<span class=\"digest-date\">" ++ date ++ "</span>"
 
     convertGroupToHtml :: ((URL, String), [FeedItemWithMeta]) -> String
-    convertGroupToHtml ((url, feedTitle), xs) = "<details open><summary><h2 class=\"summary\">" ++ feedTitle ++ " (" ++ getDomain (Just url) ++ ")</h2> (" ++ show (length xs) ++ ")</summary>" ++ feedItemsToHtml xs ++ "</details>"
+    convertGroupToHtml ((url, feedTitle), xs) = "<details><summary><h2 class=\"summary\">" ++ feedTitle ++ " (" ++ getDomain (Just url) ++ ")</h2> (" ++ show (length xs) ++ ")</summary>" ++ feedItemsToHtml xs ++ "</details>"
 
 getDomain :: Maybe String -> String
 getDomain url =
