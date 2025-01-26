@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               rdigest
-version:            0.1.6
+version:            0.1.7
 
 -- A short (one-line) description of the package.
 -- synopsis:
