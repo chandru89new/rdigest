@@ -1,5 +1,10 @@
 # rdigest - Changelog
 
+## v0.1.7
+
+- update template to be mobile-friendly.
+- make html template `<details>` be open by default (revert).
+
 ## v0.1.6
 
 - make the html template `<details>` be closed by default.
