@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               rdigest
-version:            0.1.7
+version:            0.2.0
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -24,7 +24,7 @@ extra-doc-files: CHANGELOG.md, index-template.html, template.html, migrations/1.
 common warnings
     ghc-options: -Wall
 
-build-type:         Simpl
+build-type:         Simple
 
 executable rdigest
     import:           warnings
