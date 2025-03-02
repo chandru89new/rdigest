@@ -1,5 +1,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
@@ -10,6 +11,7 @@
 module Main where
 
 import Control.Applicative ((<|>))
+import Control.Concurrent (threadDelay)
 import Control.Exception (Exception, SomeException, evaluate, throw, try)
 import Control.Monad (forM_, unless, when)
 import qualified Data.ByteString.Char8 as BS
@@ -21,11 +23,12 @@ import Data.Maybe (fromMaybe, isJust)
 import Data.Pool (Pool, defaultPoolConfig, destroyAllResources, newPool, withResource)
 import Data.String (IsString (fromString))
 import qualified Data.Text as T (Text, null, pack, replace, splitOn, strip, unpack)
-import Data.Text.Encoding (decodeUtf8)
+import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, formatTime, parseTimeM)
 import Data.Version (showVersion)
 import Database.SQLite.Simple (Connection, FromRow (fromRow), Only (Only), Query, close, execute, execute_, field, open, query, query_, toRow, withTransaction)
-import Network.HTTP.Simple (getResponseBody, httpBS, parseRequest, setRequestHeader)
+import Network.HTTP.Client.Conduit (RequestBody (RequestBodyBS))
+import Network.HTTP.Simple (getResponseBody, getResponseStatusCode, httpBS, parseRequest, setRequestBody, setRequestHeader, setRequestMethod)
 import Network.URI (URI (uriAuthority, uriScheme), URIAuth (..), parseURI)
 import Paths_rdigest (version)
 import System.Directory (getDirectoryContents)
@@ -46,6 +49,7 @@ data Command
   | PurgeEverything
   | CreateDayDigest [ArgPair]
   | CreateRangeDigest [ArgPair]
+  | Notify
   | ShowVersion
   | ShowHelp
   | InvalidCommand
@@ -58,10 +62,11 @@ data AppError
   | ArgError String
   | DigestError String
   | GeneralError String
+  | NotifyError String
   deriving (Show)
 
 data Config = Config
-  {connPool :: Pool Connection, template :: String, indexTemplate :: String, rdigestPath :: String}
+  {connPool :: Pool Connection, template :: String, indexTemplate :: String, rdigestPath :: String, token :: Maybe String, channelId :: Maybe String}
 
 data FeedItem = FeedItem {title :: String, link :: Maybe String, updated :: Maybe Day} deriving (Eq, Show)
 
@@ -164,6 +169,7 @@ main' command =
           _ <- runApp destroyDB
           putStrLn "Fin."
         else putStrLn "I have cancelled it."
+    Notify -> runApp sendDigest
     ShowVersion -> putStrLn ("rdigest " ++ showVersion version)
     ShowHelp -> putStrLn progHelp
     InvalidCommand -> do
@@ -183,6 +189,7 @@ progHelp =
   \  list feeds - List all feeds.\n\
   \  refresh - Refresh all feeds.\n\
   \  refresh <feed_url> - Refresh feed at <feed_url>. The <feed_url> must already be in your database.\n\
+  \  notify - Send digest notification to Telegram (experimental). Check docs for setting this up.\n\
   \  purge - Purge everything.\n"
 
 getCommand :: IO Command
@@ -200,6 +207,7 @@ getCommand = do
     ("digest" : "--for" : dayString : _) -> CreateDayDigest $ groupCommandArgs ["--for", dayString]
     ("digest" : xs) -> CreateRangeDigest $ groupCommandArgs xs
     ("purge" : _) -> PurgeEverything
+    ("notify" : _) -> Notify
     ("version" : _) -> ShowVersion
     ("--version" : _) -> ShowVersion
     _ -> InvalidCommand
@@ -211,8 +219,10 @@ parseURL url = case parseURI url of
 
 failWith :: (String -> AppError) -> IO a -> IO a
 failWith mkError action = do
-  res <- (try :: IO a -> IO (Either SomeException a)) action
-  pure $ either (throw . mkError . show) id res
+  res <- try action
+  case res of
+    Left (e :: SomeException) -> (throw . mkError . show) e
+    Right v -> pure v
 
 fetchUrl :: String -> IO BS.ByteString
 fetchUrl url = failWith FetchError $ do
@@ -292,7 +302,7 @@ createFeedItemsTable =
     \ link TEXT NOT NULL PRIMARY KEY, \
     \ title TEXT NOT NULL, \
     \ updated DATETIME DEFAULT CURRENT_TIMESTAMP, \
-    \ state TEXT DEFAULT 'unread',  \
+    \ state TEXT DEFAULT 'unsent',  \
     \ feed_id INTEGER NOT NULL,  \
     \ FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE \
     \);"
@@ -374,7 +384,7 @@ removeFeed url (Config{..}) =
     _ <- setPragmas conn
     res <- failWith DatabaseError $ query conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only url) :: IO [(Int, String)]
     when (null res) $ throw $ DatabaseError "I could not find any such feed in the database. Maybe it's already gone?"
-    execute conn (fromString "DELETE FROM feeds where url = ?;") (Only url)
+    failWith DatabaseError $ execute conn (fromString "DELETE FROM feeds where url = ?;") (Only url)
 
 listFeeds :: App [(Maybe String, String)]
 listFeeds (Config{..}) = do
@@ -502,6 +512,7 @@ showAppError (DatabaseError msg) = putStrLn $ "Database error: " ++ msg
 showAppError (FeedParseError msg) = putStrLn $ "Error parsing feed: " ++ msg
 showAppError (ArgError msg) = putStrLn $ "Argument error: " ++ msg
 showAppError (DigestError msg) = putStrLn $ "Digest error: " ++ msg
+showAppError (NotifyError msg) = putStrLn $ "Notification error: " ++ msg
 showAppError (GeneralError msg) = putStrLn $ "Error: " ++ msg
 
 refreshFeed :: URL -> App ()
@@ -651,11 +662,13 @@ runApp app = do
   let template = $(embedFile "./template.html")
       indexTemplate = $(embedFile "./index-template.html")
   rdigestPath <- lookupEnv "RDIGEST_FOLDER"
+  botToken <- lookupEnv "TG_TOKEN"
+  channelId <- lookupEnv "TG_CHAN_ID"
   case rdigestPath of
     Nothing -> showAppError $ GeneralError "It looks like you have not set the RDIGEST_FOLDER env. `export RDIGEST_FOLDER=<full-path-where-rdigest-should-save-data>"
     Just rdPath -> do
       pool <- newPool (defaultPoolConfig (open (getDBFile rdPath)) close 60.0 10)
-      let config = Config{connPool = pool, template = BS.unpack template, rdigestPath = rdPath, indexTemplate = BS.unpack indexTemplate}
+      let config = Config{connPool = pool, template = BS.unpack template, rdigestPath = rdPath, indexTemplate = BS.unpack indexTemplate, token = botToken, channelId = channelId}
       res <- (try :: IO a -> IO (Either AppError a)) $ app config
       destroyAllResources pool
       either showAppError (const $ return ()) res
@@ -665,3 +678,67 @@ trim = T.unpack . T.strip . T.pack
 
 getInnerText :: [Tag String] -> String
 getInnerText = trim . innerText
+
+sendDigest :: App ()
+sendDigest config@Config{..} = withResource connPool $ \conn -> do
+  linksToSend <- getUnsentLinks conn
+  forM_ linksToSend $ \item -> do
+    threadDelay 4000000
+    res <- (try :: IO a -> IO (Either AppError a)) $ do
+      putStrLn $ "Sending link: " ++ snd item
+      _ <- sendMessage item config
+      markAsSent conn item
+    case res of
+      Left e -> print e
+      Right _ -> pure ()
+
+getUnsentLinks :: Connection -> IO [(String, URL)]
+getUnsentLinks conn = failWith DatabaseError $ query conn (fromString "select title, link from feed_items where state = 'unsent' OR state = 'unread' order by feed_id desc;") () :: IO [(String, URL)]
+
+sendMessage :: (String, URL) -> Config -> IO (String, URL)
+sendMessage (title, url) Config{..} = do
+  case (token, channelId) of
+    (Just t, Just cid) -> do
+      let json =
+            "{\
+            \\"text\":\""
+              ++ BS.unpack (encodeUtf8 (T.pack title))
+              ++ "\",\
+                 \\"chat_id\":\""
+              ++ cid
+              ++ "\",\
+                 \\"link_preview_options\":{\
+                 \\"url\":\""
+              ++ url
+              ++ "\"\
+                 \}"
+      let jsonBody = BS.pack $ json
+      _ <- postJSON ("https://api.telegram.org/bot" ++ t ++ "/sendMessage") jsonBody
+      pure (title, url)
+    _ -> throw $ NotifyError "You need to set the TG_TOKEN and TG_CHAN_ID env variables."
+
+markAsSent :: Connection -> (String, URL) -> IO ()
+markAsSent conn (_, url) = failWith DatabaseError $ execute conn (fromString "update feed_items set state = 'sent' where link = ?;") (Only url)
+
+data TGMsg = TGMsg {channel_id :: String, text :: String}
+
+-- instance ToJSON TGMsg where
+--   toJSON tgMsg =
+--     object
+--       [ "channel_id" .= channel_id tgMsg
+--       , "text" .= text tgMsg
+--       ]
+
+postJSON :: String -> BS.ByteString -> IO BS.ByteString
+postJSON url jsonBody = do
+  req <- parseRequest url
+  let request =
+        setRequestMethod (BS.pack "POST") $
+          setRequestHeader (mk $ BS.pack "Content-Type") [BS.pack "application/json"] $
+            setRequestHeader (mk $ BS.pack "User-Agent") [BS.pack "Mozilla/5.0"] $
+              setRequestBody (RequestBodyBS jsonBody) req
+  response <- httpBS request
+  let code = getResponseStatusCode response
+  if code >= 300 || code < 200
+    then throw $ NotifyError $ show (getResponseBody response)
+    else pure (BS.pack "")
