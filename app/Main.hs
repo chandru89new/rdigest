@@ -14,6 +14,8 @@ import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Exception (Exception, SomeException, evaluate, throw, try)
 import Control.Monad (forM_, unless, when)
+import Data.Aeson (ToJSON (toJSON), object, (.=))
+import qualified Data.Aeson.Key as AKey
 import qualified Data.ByteString.Char8 as BS
 import Data.CaseInsensitive (mk)
 import Data.Either (fromLeft, fromRight, isLeft, isRight)
@@ -23,12 +25,11 @@ import Data.Maybe (fromMaybe, isJust)
 import Data.Pool (Pool, defaultPoolConfig, destroyAllResources, newPool, withResource)
 import Data.String (IsString (fromString))
 import qualified Data.Text as T (Text, null, pack, replace, splitOn, strip, unpack)
-import Data.Text.Encoding (decodeUtf8, encodeUtf8)
+import Data.Text.Encoding (decodeUtf8)
 import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, formatTime, parseTimeM)
 import Data.Version (showVersion)
 import Database.SQLite.Simple (Connection, FromRow (fromRow), Only (Only), Query, close, execute, execute_, field, open, query, query_, toRow, withTransaction)
-import Network.HTTP.Client.Conduit (RequestBody (RequestBodyBS))
-import Network.HTTP.Simple (getResponseBody, getResponseStatusCode, httpBS, parseRequest, setRequestBody, setRequestHeader, setRequestMethod)
+import Network.HTTP.Simple (getResponseBody, getResponseStatusCode, httpBS, parseRequest, setRequestBodyJSON, setRequestHeader, setRequestMethod)
 import Network.URI (URI (uriAuthority, uriScheme), URIAuth (..), parseURI)
 import Paths_rdigest (version)
 import System.Directory (getDirectoryContents)
@@ -700,43 +701,37 @@ sendMessage (title, url) Config{..} = do
   case (token, channelId) of
     (Just t, Just cid) -> do
       let json =
-            "{\
-            \\"text\":\""
-              ++ BS.unpack (encodeUtf8 (T.pack title))
-              ++ "\",\
-                 \\"chat_id\":\""
-              ++ cid
-              ++ "\",\
-                 \\"link_preview_options\":{\
-                 \\"url\":\""
-              ++ url
-              ++ "\"\
-                 \}"
-      let jsonBody = BS.pack $ json
-      _ <- postJSON ("https://api.telegram.org/bot" ++ t ++ "/sendMessage") jsonBody
+            TgMsg
+              { chat_id = cid
+              , text = title ++ " (" ++ url ++ ")"
+              , link_preview_options = LinkPreviewOptions{link_url = url}
+              }
+      _ <- postJSON ("https://api.telegram.org/bot" ++ t ++ "/sendMessage") json
       pure (title, url)
     _ -> throw $ NotifyError "You need to set the TG_TOKEN and TG_CHAN_ID env variables."
 
 markAsSent :: Connection -> (String, URL) -> IO ()
 markAsSent conn (_, url) = failWith DatabaseError $ execute conn (fromString "update feed_items set state = 'sent' where link = ?;") (Only url)
 
-data TGMsg = TGMsg {channel_id :: String, text :: String}
+data TgMsg = TgMsg {chat_id :: String, text :: String, link_preview_options :: LinkPreviewOptions}
+newtype LinkPreviewOptions = LinkPreviewOptions {link_url :: String}
 
--- instance ToJSON TGMsg where
---   toJSON tgMsg =
---     object
---       [ "channel_id" .= channel_id tgMsg
---       , "text" .= text tgMsg
---       ]
+instance ToJSON TgMsg where
+  toJSON tgMsg =
+    object
+      [ AKey.fromString "chat_id" .= chat_id tgMsg
+      , AKey.fromString "text" .= text tgMsg
+      , AKey.fromString "link_preview_options" .= object [AKey.fromString "url" .= link_url (link_preview_options tgMsg)]
+      ]
 
-postJSON :: String -> BS.ByteString -> IO BS.ByteString
+postJSON :: String -> TgMsg -> IO BS.ByteString
 postJSON url jsonBody = do
   req <- parseRequest url
   let request =
         setRequestMethod (BS.pack "POST") $
           setRequestHeader (mk $ BS.pack "Content-Type") [BS.pack "application/json"] $
             setRequestHeader (mk $ BS.pack "User-Agent") [BS.pack "Mozilla/5.0"] $
-              setRequestBody (RequestBodyBS jsonBody) req
+              setRequestBodyJSON jsonBody req
   response <- httpBS request
   let code = getResponseStatusCode response
   if code >= 300 || code < 200

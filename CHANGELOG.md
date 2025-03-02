@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.2.1
+
+- Use JSON instead of plain text during HTTP calls to TG notification.
+
 ## v0.2.0
 
 Some big, spicy change here.
