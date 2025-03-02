@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               rdigest
-version:            0.2.0
+version:            0.2.1
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -44,7 +44,8 @@ executable rdigest
                         time,
                         file-embed,
                         case-insensitive,
-                        directory
+                        directory,
+                        aeson
     hs-source-dirs:   app
     default-language: Haskell2010
     ghc-options: -Wall -Wincomplete-patterns
