@@ -12,7 +12,7 @@
 
 Some big, spicy change here.
 
-- Add the ability to "notify": this sends digest links to a channel on Telegram. Needs TG_TOKEN and TG_CHAN_ID env vars to be set for this to work.
+- Add the ability to "notify": this sends digest links to a channel on Telegram. Needs TG_TOKEN and TG_CHANNEL_ID env vars to be set for this to work.
 - Change the default value for 'state' column to be 'unsent' instead of 'unread'.
 
 ## v0.1.7

@@ -664,12 +664,15 @@ runApp app = do
       indexTemplate = $(embedFile "./index-template.html")
   rdigestPath <- lookupEnv "RDIGEST_FOLDER"
   botToken <- lookupEnv "TG_TOKEN"
-  channelId <- lookupEnv "TG_CHAN_ID"
+  channelId <- lookupEnv "TG_CHANNEL_ID"
+  chatId <- lookupEnv "TG_CHAT_ID" -- backwards compatibility
+  chanId <- lookupEnv "TG_CHAN_ID" -- backwards compatibility
+  let _channelId = channelId <|> chatId <|> chanId
   case rdigestPath of
     Nothing -> showAppError $ GeneralError "It looks like you have not set the RDIGEST_FOLDER env. `export RDIGEST_FOLDER=<full-path-where-rdigest-should-save-data>"
     Just rdPath -> do
       pool <- newPool (defaultPoolConfig (open (getDBFile rdPath)) close 60.0 10)
-      let config = Config{connPool = pool, template = BS.unpack template, rdigestPath = rdPath, indexTemplate = BS.unpack indexTemplate, token = botToken, channelId = channelId}
+      let config = Config{connPool = pool, template = BS.unpack template, rdigestPath = rdPath, indexTemplate = BS.unpack indexTemplate, token = botToken, channelId = _channelId}
       res <- (try :: IO a -> IO (Either AppError a)) $ app config
       destroyAllResources pool
       either showAppError (const $ return ()) res
@@ -711,12 +714,13 @@ sendMessage (title, url) Config{..} = do
               }
       _ <- postJSON ("https://api.telegram.org/bot" ++ t ++ "/sendMessage") json
       pure (title, url)
-    _ -> throw $ NotifyError "You need to set the TG_TOKEN and TG_CHAN_ID env variables."
+    _ -> throw $ NotifyError "You need to set the TG_TOKEN and TG_CHANNEL_ID env variables."
 
 markAsSent :: Connection -> (String, URL) -> IO ()
 markAsSent conn (_, url) = failWith DatabaseError $ execute conn (fromString "update feed_items set state = 'sent' where link = ?;") (Only url)
 
 data TgMsg = TgMsg {chat_id :: String, text :: String, link_preview_options :: LinkPreviewOptions}
+
 newtype LinkPreviewOptions = LinkPreviewOptions {link_url :: String}
 
 instance ToJSON TgMsg where
