@@ -683,18 +683,21 @@ getInnerText = trim . innerText
 sendDigest :: App ()
 sendDigest config@Config{..} = withResource connPool $ \conn -> do
   linksToSend <- getUnsentLinks conn
-  forM_ linksToSend $ \item -> do
-    threadDelay 4000000
-    res <- (try :: IO a -> IO (Either AppError a)) $ do
-      putStrLn $ "Sending link: " ++ snd item
-      _ <- sendMessage item config
-      markAsSent conn item
-    case res of
-      Left e -> print e
-      Right _ -> pure ()
+  let chunks = chunksOf 20 linksToSend
+      totalChunks = length chunks
+  forM_ (zip [1 ..] chunks) $ \(index, chunk) -> do
+    forM_ chunk $ \item -> do
+      res <- (try :: IO a -> IO (Either AppError a)) $ do
+        putStrLn $ "Sending link: " ++ snd item
+        _ <- sendMessage item config
+        markAsSent conn item
+      case res of
+        Left e -> print e
+        Right _ -> pure ()
+    when (index < totalChunks) $ threadDelay 65000000
 
 getUnsentLinks :: Connection -> IO [(String, URL)]
-getUnsentLinks conn = failWith DatabaseError $ query conn (fromString "select title, link from feed_items where state = 'unsent' OR state = 'unread' order by feed_id desc;") () :: IO [(String, URL)]
+getUnsentLinks conn = failWith DatabaseError $ query conn (fromString "select title, link from feed_items where state = 'unsent' OR state = 'unread' order by feed_id;") () :: IO [(String, URL)]
 
 sendMessage :: (String, URL) -> Config -> IO (String, URL)
 sendMessage (title, url) Config{..} = do
@@ -737,3 +740,10 @@ postJSON url jsonBody = do
   if code >= 300 || code < 200
     then throw $ NotifyError $ show (getResponseBody response)
     else pure (BS.pack "")
+
+chunksOf :: Int -> [a] -> [[a]]
+chunksOf _ [] = []
+chunksOf n xs = take n xs : chunksOf n (drop n xs)
+
+toMicroseconds :: Int -> Int
+toMicroseconds x = x * 1000
