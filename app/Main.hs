@@ -171,7 +171,7 @@ main' command =
           putStrLn "Fin."
         else putStrLn "I have cancelled it."
     Notify -> runApp sendDigest
-    ShowVersion -> putStrLn ("rdigest " ++ showVersion version)
+    ShowVersion -> putStrLn ("rdigest v" ++ showVersion version)
     ShowHelp -> putStrLn progHelp
     InvalidCommand -> do
       putStrLn "I could not recognize that command. Try `rdigest help`."
