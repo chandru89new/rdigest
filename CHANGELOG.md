@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.3.0
+
+- Different notification strategy to work around msging limits on Telegram.
+
 ## v0.2.1
 
 - Use JSON instead of plain text during HTTP calls to TG notification.
