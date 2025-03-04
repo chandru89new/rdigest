@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.3.2
+
+- Fix an unhandled error condition when sending a telegram notification fails.
+
 ## v0.3.0
 
 - Different notification strategy to work around msging limits on Telegram.
