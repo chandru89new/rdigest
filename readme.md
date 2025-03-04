@@ -1,22 +1,33 @@
 # rdigest
 
-A tool I am building to learn Haskell and manage my online reading/content consumption activity better.
+Create "daily digests" of your (RSS) feeds.
+
+Started as a project to build something in Haskell ("learn by building"), has grown into a tool I use to manage my daily catch-up of internet links.
 
 ## What does this do?
 
-It's an RSS reader — but it just creates "daily digests" like these from the feeds I want:
-
-![](https://images2.imgbox.com/1d/ca/t7iIGCrp_o.png)
-
-This makes it easy for me to skim through stuff and pick the ones I want to read on a day (or between date ranges).
-
 ## How to run this?
 
-- This is a Haskell project, so you'd need Haskell stuff to run this. (pre-built binaries are not yet a thing in this project but they're part of the [roadmap](./#roadmap))
-- Install `ghcup` — [some helpful instructions here](https://www.haskell.org/ghcup/install/)
-- Install the latest recommended version of `ghc` and `cabal` through `ghcup`. Running `ghcup help` would point you in the right direction
-- Clone this project
-- In terminal, at the root of this project, run `cabal build && cabal install`. This will build an executable called `rdigest`. You can simply call `rdigest` after that to run this tool.
+- Grab the executable from the [releases](https://github.com/chandru89new/rdigest/releases/latest). At the time of writing this, binaries are built for MacOS (latest, M\* architecture) and Linux machines (x86-64) only but this should be sufficient unless you're running Windows.
+
+- Make the executable "executable":
+
+```sh
+> tar -xzf rdigest_darwin_arm64_v0.3.1.tar.gz # you have to change this to point to the correct file that you downloaded from the release
+> chmod +x rdigest
+```
+
+- Set env var specifying which folder `rdigest` should use:
+
+```sh
+> export RDIGEST_FOLDER=./path/to/folder
+```
+
+- Run `rdigest init` to get started:
+
+```sh
+> rdigest init
+```
 
 ## rdigest commands
 
@@ -53,12 +64,43 @@ Make sure you set up an `RDIGEST_FOLDER` environment variable before you use `rd
 # just update one feed
 > rdigest refresh <feed_url>
 
+# send notifications to Telegram channel
+> rdigest notify
+# check the Telegram Notification section for more info
+
 # delete everything, remove the database. This won't delete the digests.
 > rdigest purge
 ```
 
+## Telegram Notification
+
+`rdigest` can, if needed, send the daily digest links as messages to a Telegram chat/channel.
+
+To do this:
+
+- create a Telegram bot and grab the bot's token.
+- create a Telegram channel and get the channel's ID (usually a negative integer)
+- invite the bot you created into the channel you created with Admin-like privileges (ie, the bot should be able to post messages to the channel)
+- in your terminal where you run `rdigest`, set these env vars:
+
+```sh
+> export TG_TOKEN=<bot token>
+> export TG_CHANNEL_ID=<the channel id>
+```
+
+- get rdigest to send the notifications:
+
+```sh
+> rdigest notify
+```
+
+Links that are sent as notifications will be marked, so they won't be sent again.
+
+Note: Due to Telegram's rate limits, `rdigest` will space-out batches of notifications, with ~1 minute wait time between sending out each batch of 20 or so notifications.
+
 ## Roadmap
 
-- [ ] spin up a server, for a UI-driven rdigest
 - [x] create pre-built binaries for Linux for release
-- [ ] create pre-built binaries for Mac for release
+- [x] create pre-built binaries for Mac for release
+- [x] add TG bot notification support
+- [ ] add GUI

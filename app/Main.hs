@@ -83,6 +83,10 @@ type ArgPair = (String, ArgVal)
 
 data ArgVal = ArgBool Bool | ArgString String deriving (Eq, Show)
 
+data TgMsg = TgMsg {chat_id :: String, text :: String, link_preview_options :: LinkPreviewOptions}
+
+newtype LinkPreviewOptions = LinkPreviewOptions {link_url :: String}
+
 newtype MultipleQueries = MultipleQueries String
 
 instance Exception AppError
@@ -92,6 +96,14 @@ instance FromRow FeedItem where
 
 instance FromRow FeedId where
   fromRow = FeedId <$> field
+
+instance ToJSON TgMsg where
+  toJSON tgMsg =
+    object
+      [ AKey.fromString "chat_id" .= chat_id tgMsg
+      , AKey.fromString "text" .= text tgMsg
+      , AKey.fromString "link_preview_options" .= object [AKey.fromString "url" .= link_url (link_preview_options tgMsg)]
+      ]
 
 main :: IO ()
 main = do
@@ -684,52 +696,41 @@ getInnerText :: [Tag String] -> String
 getInnerText = trim . innerText
 
 sendDigest :: App ()
-sendDigest config@Config{..} = withResource connPool $ \conn -> do
-  linksToSend <- getUnsentLinks conn
-  let chunks = chunksOf 20 linksToSend
-      totalChunks = length chunks
-  forM_ (zip [1 ..] chunks) $ \(index, chunk) -> do
-    forM_ chunk $ \item -> do
-      res <- (try :: IO a -> IO (Either AppError a)) $ do
-        putStrLn $ "Sending link: " ++ snd item
-        _ <- sendMessage item config
-        markAsSent conn item
-      case res of
-        Left e -> print e
-        Right _ -> pure ()
-    when (index < totalChunks) $ threadDelay 65000000
+sendDigest Config{..} = withResource connPool $ \conn -> do
+  case (token, channelId) of
+    (Just token_, Just channelId_) -> do
+      linksToSend <- getUnsentLinks conn
+      let chunks = chunksOf 20 linksToSend
+          totalChunks = length chunks
+      forM_ (zip [1 ..] chunks) $ \(index, chunk) -> do
+        forM_ chunk $ \item -> do
+          res <- (try :: IO a -> IO (Either AppError a)) $ do
+            putStrLn $ "Sending link: " ++ snd item
+            sendMessage item token_ channelId_
+            markAsSent conn item
+          case res of
+            Left e -> print e
+            Right _ -> pure ()
+        when (index < totalChunks) $ threadDelay (toMicroseconds 65)
+    _ -> do
+      throw $ NotifyError "You have not set the TG_TOKEN and/or the TG_CHANNEL_ID env var."
 
 getUnsentLinks :: Connection -> IO [(String, URL)]
 getUnsentLinks conn = failWith DatabaseError $ query conn (fromString "select title, link from feed_items where state = 'unsent' OR state = 'unread' order by feed_id;") () :: IO [(String, URL)]
 
-sendMessage :: (String, URL) -> Config -> IO (String, URL)
-sendMessage (title, url) Config{..} = do
-  case (token, channelId) of
-    (Just t, Just cid) -> do
-      let json =
-            TgMsg
-              { chat_id = cid
-              , text = title ++ " (" ++ url ++ ")"
-              , link_preview_options = LinkPreviewOptions{link_url = url}
-              }
-      _ <- postJSON ("https://api.telegram.org/bot" ++ t ++ "/sendMessage") json
-      pure (title, url)
-    _ -> throw $ NotifyError "You need to set the TG_TOKEN and TG_CHANNEL_ID env variables."
+sendMessage :: (String, URL) -> String -> String -> IO ()
+sendMessage (title, url) token channelId = failWith NotifyError $ do
+  let json =
+        TgMsg
+          { chat_id = channelId
+          , text = title ++ " (" ++ url ++ ")"
+          , link_preview_options = LinkPreviewOptions{link_url = url}
+          }
+  _ <- postJSON ("https://api.telegram.org/bot" ++ token ++ "/sendMessage") json
+  pure ()
 
 markAsSent :: Connection -> (String, URL) -> IO ()
 markAsSent conn (_, url) = failWith DatabaseError $ execute conn (fromString "update feed_items set state = 'sent' where link = ?;") (Only url)
-
-data TgMsg = TgMsg {chat_id :: String, text :: String, link_preview_options :: LinkPreviewOptions}
-
-newtype LinkPreviewOptions = LinkPreviewOptions {link_url :: String}
-
-instance ToJSON TgMsg where
-  toJSON tgMsg =
-    object
-      [ AKey.fromString "chat_id" .= chat_id tgMsg
-      , AKey.fromString "text" .= text tgMsg
-      , AKey.fromString "link_preview_options" .= object [AKey.fromString "url" .= link_url (link_preview_options tgMsg)]
-      ]
 
 postJSON :: String -> TgMsg -> IO BS.ByteString
 postJSON url jsonBody = do
@@ -750,4 +751,4 @@ chunksOf _ [] = []
 chunksOf n xs = take n xs : chunksOf n (drop n xs)
 
 toMicroseconds :: Int -> Int
-toMicroseconds x = x * 1000
+toMicroseconds x = x * 1000 * 1000
