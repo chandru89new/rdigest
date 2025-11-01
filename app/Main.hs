@@ -20,15 +20,16 @@ import qualified Data.ByteString.Char8 as BS
 import Data.CaseInsensitive (mk)
 import Data.Either (fromLeft, fromRight, isLeft, isRight)
 import Data.FileEmbed (embedFile)
-import Data.List (intercalate, isInfixOf, isSuffixOf, sort, sortBy)
-import Data.Maybe (fromMaybe, isJust)
+import Data.List (intercalate, isInfixOf, isSuffixOf, sortBy)
+import Data.Maybe (catMaybes, fromMaybe, isJust)
+import Data.Ord (Down (Down), comparing)
 import Data.Pool (Pool, defaultPoolConfig, destroyAllResources, newPool, withResource)
 import Data.String (IsString (fromString))
 import qualified Data.Text as T (Text, null, pack, replace, splitOn, strip, unpack)
 import Data.Text.Encoding (decodeUtf8)
 import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, formatTime, parseTimeM)
 import Data.Version (showVersion)
-import Database.SQLite.Simple (Connection, FromRow (fromRow), Only (Only), Query, close, execute, execute_, field, open, query, query_, toRow, withTransaction)
+import Database.SQLite.Simple (Connection, FromRow (fromRow), Only (Only), Query, ToRow, close, execute, execute_, field, open, query, query_, toRow, withTransaction)
 import Network.HTTP.Simple (getResponseBody, getResponseStatusCode, httpBS, parseRequest, setRequestBodyJSON, setRequestHeader, setRequestMethod)
 import Network.URI (URI (uriAuthority, uriScheme), URIAuth (..), parseURI)
 import Paths_rdigest (version)
@@ -36,6 +37,8 @@ import System.Directory (getDirectoryContents)
 import System.Environment (getArgs, lookupEnv)
 import System.IO (hFlush, stdout)
 import Text.HTML.TagSoup (Tag (..), fromAttrib, innerText, parseTags, partitions, (~/=), (~==))
+
+-- TYPES
 
 type URL = String
 
@@ -104,6 +107,8 @@ instance ToJSON TgMsg where
       , AKey.fromString "text" .= text tgMsg
       , AKey.fromString "link_preview_options" .= object [AKey.fromString "url" .= link_url (link_preview_options tgMsg)]
       ]
+
+-- MAIN
 
 main :: IO ()
 main = do
@@ -188,6 +193,8 @@ main' command =
     InvalidCommand -> do
       putStrLn "I could not recognize that command. Try `rdigest help`."
 
+-- FUNCTIONS
+
 progHelp :: String
 progHelp =
   "Usage: rdigest <command> [args]\n\
@@ -225,18 +232,6 @@ getCommand = do
     ("--version" : _) -> ShowVersion
     _ -> InvalidCommand
 
-parseURL :: String -> Maybe URL
-parseURL url = case parseURI url of
-  Just uri -> (if uriScheme uri `elem` ["http:", "https:"] then Just url else Nothing)
-  Nothing -> Nothing
-
-failWith :: (String -> AppError) -> IO a -> IO a
-failWith mkError action = do
-  res <- try action
-  case res of
-    Left (e :: SomeException) -> (throw . mkError . show) e
-    Right v -> pure v
-
 fetchUrl :: String -> IO BS.ByteString
 fetchUrl url = failWith FetchError $ do
   req <- parseRequest url
@@ -262,44 +257,34 @@ extractFeedItem tags =
       linkFromYtFeed = extractLinkHref tags -- youtube specific
       link = nothingIfEmpty . getInnerText $ takeBetween "<link>" "</link>" tags
       pubDate = nothingIfEmpty . getInnerText $ takeBetween "<pubDate>" "</pubDate>" tags
+      publishedDate = nothingIfEmpty . getInnerText $ takeBetween "<published>" "</published>" tags
       updatedDate = nothingIfEmpty . getInnerText $ takeBetween "<updated>" "</updated>" tags
-      updated = pubDate <|> updatedDate
+      updated = pubDate <|> publishedDate <|> updatedDate
    in FeedItem{title = title, link = link <|> linkFromYtFeed, updated = updated >>= parseDate}
-
-extractLinkHref :: [Tag String] -> Maybe String
-extractLinkHref tags =
-  let links = extractBetweenTag "link" tags
-   in case links of
-        (h : _) -> Just $ fromAttrib "href" h
-        _ -> Nothing
-
-extractBetweenTag :: String -> [Tag String] -> [Tag String]
-extractBetweenTag tag tags =
-  let startTag = TagOpen tag []
-      endTag = TagClose tag
-   in takeWhile (~/= endTag) $ dropWhile (~/= startTag) tags
-
-takeBetween :: String -> String -> [Tag String] -> [Tag String]
-takeBetween start end tags = takeWhile (~/= end) $ dropWhile (~/= start) tags
 
 insertFeedItem :: Connection -> (Int, FeedItem) -> IO (Maybe FeedItem)
 insertFeedItem conn (feedId, feedItem@FeedItem{..}) = do
-  rows <- failWith DatabaseError $ query conn queryToCheckIfItemExists (Only link) :: IO [FeedItem]
+  rows <- query' conn queryToCheckIfItemExists (Only link) :: IO [FeedItem]
   case rows of
     (_ : _) -> pure Nothing
     _ -> do
-      _ <- failWith DatabaseError $ execute conn insertFeedQuery $ toRow (title, link, updated, feedId) :: IO ()
+      _ <- execute' conn insertFeedQuery $ toRow (title, link, updated, feedId) :: IO ()
       pure (Just feedItem)
 
 insertFeed :: URL -> App [(Int, URL)]
 insertFeed feedUrl (Config{..}) = do
   let q = fromString "INSERT INTO feeds (title,url) VALUES (?,?);"
-  do
-    feedContents <- fetchUrl feedUrl
-    let title = extractTitleFromFeedUrl feedUrl feedContents
-    failWith DatabaseError $ withResource connPool $ \conn -> do
-      execute conn q (title, feedUrl)
-      query conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only feedUrl)
+  let q' = fromString "SELECT id from feeds where url = ?;" :: Query
+  withResource connPool $ \conn -> do
+    res <- query' conn q' (Only feedUrl) :: IO [FeedId]
+    if null res
+      then do
+        feedContents <- fetchUrl feedUrl
+        let title = extractTitleFromFeedUrl feedUrl feedContents
+        execute' conn q (title, feedUrl)
+        query' conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only feedUrl)
+      else
+        throw $ GeneralError "Looks like you have this feed already."
 
 getFeedUrlsFromDB :: App [(Int, URL)]
 getFeedUrlsFromDB (Config{..}) = failWith DatabaseError $ withResource connPool handleQuery
@@ -346,7 +331,7 @@ processFeed (feedId, url) (Config{..}) = do
   putStrLn $ "Processing: " ++ url
   withResource connPool $ \conn -> do
     _ <- setPragmas conn
-    feedIdExists <- failWith DatabaseError (query conn (fromString "SELECT id FROM feeds where id = ?;") (Only feedId)) :: IO [FeedId]
+    feedIdExists <- query' conn (fromString "SELECT id FROM feeds where id = ?;") (Only feedId) :: IO [FeedId]
     when (null feedIdExists) $ throw $ DatabaseError "You have to first add this feed to your database. Try `rdigest add <url>`."
     contents <- fetchUrl url
     feedItems <- evaluate (extractFeedItems contents)
@@ -382,9 +367,6 @@ updateAllFeeds config = do
   urls <- getFeedUrlsFromDB config
   processFeeds urls config
 
-nothingIfEmpty :: (Foldable t) => t a -> Maybe (t a)
-nothingIfEmpty a = if null a then Nothing else Just a
-
 destroyDB :: App ()
 destroyDB (Config{..}) =
   withResource connPool $ \conn -> do
@@ -395,14 +377,14 @@ removeFeed :: URL -> App ()
 removeFeed url (Config{..}) =
   withResource connPool $ \conn -> do
     _ <- setPragmas conn
-    res <- failWith DatabaseError $ query conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only url) :: IO [(Int, String)]
+    res <- query' conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only url) :: IO [(Int, String)]
     when (null res) $ throw $ DatabaseError "I could not find any such feed in the database. Maybe it's already gone?"
-    failWith DatabaseError $ execute conn (fromString "DELETE FROM feeds where url = ?;") (Only url)
+    execute' conn (fromString "DELETE FROM feeds where url = ?;") (Only url)
 
 listFeeds :: App [(Maybe String, String)]
 listFeeds (Config{..}) = do
   withResource connPool $ \conn -> do
-    failWith DatabaseError $ query_ conn selectAllFeeds :: IO [(Maybe String, String)]
+    query_' conn selectAllFeeds :: IO [(Maybe String, String)]
 
 setPragmas :: Connection -> IO ()
 setPragmas = flip execute_ (fromString "PRAGMA foreign_keys = ON;")
@@ -417,7 +399,7 @@ userConfirmation msg = do
 
 createDigest :: Day -> App [FeedItemWithMeta]
 createDigest day config = withResource (connPool config) $ \conn -> do
-  xs <- failWith DatabaseError $ query conn q (Only day) :: IO [(String, String, String, String, Day)]
+  xs <- query' conn q (Only day) :: IO [(String, String, String, String, Day)]
   pure $ map (\(url, feedTitle, link, title, updated) -> FeedItemWithMeta{feedItem = FeedItem{title = title, link = Just link, updated = Just updated}, feedTitle = feedTitle, feedURL = url}) xs
  where
   q = fromString "select feeds.url, feeds.title as feed_title, f.link, f.title, f.updated from feed_items f join feeds on f.feed_id = feeds.id where f.updated = ?;"
@@ -478,19 +460,6 @@ replaceDigestTitle = replaceContent "{digestTitle}"
 replaceDigestSummary :: String -> String -> String
 replaceDigestSummary = replaceContent "{digestSummary}"
 
-replaceContent :: String -> String -> String -> String
-replaceContent pattern replaceWith content = T.unpack $ T.replace (T.pack pattern) (T.pack replaceWith) (T.pack content)
-
-showDay :: Day -> String
-showDay = formatTime defaultTimeLocale "%B %d, %Y"
-
-replaceSmartQuotes :: T.Text -> T.Text
-replaceSmartQuotes =
-  T.replace (T.pack "“") (T.pack "\"")
-    . T.replace (T.pack "”") (T.pack "\"")
-    . T.replace (T.pack "‘") (T.pack "'")
-    . T.replace (T.pack "’") (T.pack "'")
-
 groupCommandArgs :: [String] -> [ArgPair]
 groupCommandArgs = go []
  where
@@ -519,19 +488,10 @@ extractArgBool key argPairs = lookup key argPairs >>= extractBool
   extractBool (ArgBool bool) = Just bool
   extractBool _ = Nothing
 
-showAppError :: AppError -> IO ()
-showAppError (FetchError msg) = putStrLn $ "Error fetching URL: " ++ msg
-showAppError (DatabaseError msg) = putStrLn $ "Database error: " ++ msg
-showAppError (FeedParseError msg) = putStrLn $ "Error parsing feed: " ++ msg
-showAppError (ArgError msg) = putStrLn $ "Argument error: " ++ msg
-showAppError (DigestError msg) = putStrLn $ "Digest error: " ++ msg
-showAppError (NotifyError msg) = putStrLn $ "Notification error: " ++ msg
-showAppError (GeneralError msg) = putStrLn $ "Error: " ++ msg
-
 refreshFeed :: URL -> App ()
 refreshFeed url config@Config{..} = do
   let q = fromString "select id, url from feeds where url = ?;"
-  res <- withResource connPool $ \conn -> failWith DatabaseError $ query conn q (Only url) :: IO [(Int, String)]
+  res <- withResource connPool $ \conn -> query' conn q (Only url) :: IO [(Int, String)]
   case res of
     [] -> throw $ DatabaseError $ "I could not find " ++ url ++ " in your list of feeds. Try `rdigest list feeds` to see your feeds."
     (feedId, _) : _ -> do
@@ -582,7 +542,7 @@ updateIndexFile :: App ()
 updateIndexFile Config{..} = do
   files <- getDirectoryContents rdigestPath
   let htmlFiles = filter (\file -> isSuffixOf ".html" file && file /= "index.html") files
-      sortedHtmlFiles = reverse $ sort htmlFiles
+      sortedHtmlFiles = sortBy (comparing Down) htmlFiles
   indexFileContents <- generateIndexFileContent sortedHtmlFiles
   failWith GeneralError $ writeFile (rdigestPath ++ "/index.html") indexFileContents
  where
@@ -611,43 +571,19 @@ updateAllDigests :: App ()
 updateAllDigests config@Config{..} = do
   let minDateQuery = fromString "select min(distinct(updated)) from feed_items;"
       maxDateQuery = fromString "select max(distinct(updated)) from feed_items;"
-  withResource connPool $ \conn ->
-    failWith DatabaseError $ do
-      minDate <- query_ conn minDateQuery :: IO [Only Day]
-      maxDate <- query_ conn maxDateQuery :: IO [Only Day]
-      case (minDate, maxDate) of
-        ([Only minD], [Only maxD]) -> createDigestForDateRange minD maxD config
-        _ -> putStrLn "I couldn't find any posts in the database."
+  withResource connPool $ \conn -> do
+    minDate <- query_' conn minDateQuery :: IO [Only Day]
+    maxDate <- query_' conn maxDateQuery :: IO [Only Day]
+    case (minDate, maxDate) of
+      ([Only minD], [Only maxD]) -> createDigestForDateRange minD maxD config
+      _ -> putStrLn "I couldn't find any posts in the database."
 
 getValidDatesBetween :: Day -> Day -> App [Day]
 getValidDatesBetween start end Config{..} = do
   let queryToGetDates = fromString "select count(updated), updated from feed_items where updated >= ? and updated <= ? group by updated order by updated desc;"
   withResource connPool $ \conn -> do
-    days <- failWith DatabaseError $ query conn queryToGetDates (start, end) :: IO [(Int, Day)]
+    days <- query' conn queryToGetDates (start, end) :: IO [(Int, Day)]
     pure $ map snd days
-
-parseDate :: String -> Maybe Day
-parseDate datetime = fmap utctDay $ firstJust $ map tryParse [fmt1, fmt2, fmt3, fmt4, fmt5, fmt6]
- where
-  fmt1 = "%Y-%m-%dT%H:%M:%S%z"
-  fmt2 = "%a, %d %b %Y %H:%M:%S %z"
-  fmt3 = "%a, %d %b %Y %H:%M:%S %Z"
-  fmt4 = "%Y-%m-%dT%H:%M:%S%Z"
-  fmt5 = "%Y-%m-%dT%H:%M:%S%Q%z"
-  fmt6 = "%Y-%m-%dT%H:%M:%S%Q%Z"
-  tryParse fmt = parseTimeM True defaultTimeLocale fmt datetime :: Maybe UTCTime
-  firstJust :: [Maybe a] -> Maybe a
-  firstJust xs = go xs Nothing
-   where
-    go [] acc = acc
-    go (x : xs_) acc = case x of
-      Just y -> Just y
-      Nothing -> go xs_ acc
-
-justRunQuery :: Connection -> Query -> IO ()
-justRunQuery conn q = do
-  _ <- failWith DatabaseError $ execute_ conn q
-  pure ()
 
 initializeTables :: Connection -> IO ()
 initializeTables conn = do
@@ -689,12 +625,6 @@ runApp app = do
       destroyAllResources pool
       either showAppError (const $ return ()) res
 
-trim :: String -> String
-trim = T.unpack . T.strip . T.pack
-
-getInnerText :: [Tag String] -> String
-getInnerText = trim . innerText
-
 sendDigest :: App ()
 sendDigest Config{..} = withResource connPool $ \conn -> do
   case (token, channelId) of
@@ -716,7 +646,7 @@ sendDigest Config{..} = withResource connPool $ \conn -> do
       throw $ NotifyError "You have not set the TG_TOKEN and/or the TG_CHANNEL_ID env var."
 
 getUnsentLinks :: Connection -> IO [(String, URL)]
-getUnsentLinks conn = failWith DatabaseError $ query conn (fromString "select title, link from feed_items where state = 'unsent' OR state = 'unread' order by feed_id;") () :: IO [(String, URL)]
+getUnsentLinks conn = query' conn (fromString "select title, link from feed_items where state = 'unsent' OR state = 'unread' order by feed_id;") () :: IO [(String, URL)]
 
 sendMessage :: (String, URL) -> String -> String -> IO ()
 sendMessage (title, url) token channelId = failWith NotifyError $ do
@@ -730,7 +660,7 @@ sendMessage (title, url) token channelId = failWith NotifyError $ do
   pure ()
 
 markAsSent :: Connection -> (String, URL) -> IO ()
-markAsSent conn (_, url) = failWith DatabaseError $ execute conn (fromString "update feed_items set state = 'sent' where link = ?;") (Only url)
+markAsSent conn (_, url) = execute' conn (fromString "update feed_items set state = 'sent' where link = ?;") (Only url)
 
 postJSON :: String -> TgMsg -> IO BS.ByteString
 postJSON url jsonBody = do
@@ -746,9 +676,135 @@ postJSON url jsonBody = do
     then throw $ NotifyError $ show (getResponseBody response)
     else pure (BS.pack "")
 
+-- UTILS
+
+failWith :: (String -> AppError) -> IO a -> IO a
+failWith mkError action = do
+  res <- try action
+  case res of
+    Left (e :: SomeException) -> (throw . mkError . show) e
+    Right v -> pure v
+
+query' :: (ToRow a, FromRow r) => Connection -> Query -> a -> IO [r]
+query' conn q = failWith DatabaseError . query conn q
+
+query_' :: (FromRow r) => Connection -> Query -> IO [r]
+query_' conn = failWith DatabaseError . query_ conn
+
+execute' :: (ToRow a) => Connection -> Query -> a -> IO ()
+execute' conn q = failWith DatabaseError . execute conn q
+
+execute_' :: Connection -> Query -> IO ()
+execute_' conn = failWith DatabaseError . execute_ conn
+
 chunksOf :: Int -> [a] -> [[a]]
 chunksOf _ [] = []
 chunksOf n xs = take n xs : chunksOf n (drop n xs)
 
 toMicroseconds :: Int -> Int
 toMicroseconds x = x * 1000 * 1000
+
+trim :: String -> String
+trim = T.unpack . T.strip . T.pack
+
+getInnerText :: [Tag String] -> String
+getInnerText = trim . innerText
+
+justRunQuery :: Connection -> Query -> IO ()
+justRunQuery conn q = do
+  _ <- execute_' conn q
+  pure ()
+
+parseDate :: String -> Maybe Day
+parseDate datetime = fmap utctDay $ firstJust $ map tryParse [fmt1, fmt2, fmt3, fmt4, fmt5, fmt6]
+ where
+  fmt1 = "%Y-%m-%dT%H:%M:%S%z"
+  fmt2 = "%a, %d %b %Y %H:%M:%S %z"
+  fmt3 = "%a, %d %b %Y %H:%M:%S %Z"
+  fmt4 = "%Y-%m-%dT%H:%M:%S%Z"
+  fmt5 = "%Y-%m-%dT%H:%M:%S%Q%z"
+  fmt6 = "%Y-%m-%dT%H:%M:%S%Q%Z"
+  tryParse fmt = parseTimeM True defaultTimeLocale fmt datetime :: Maybe UTCTime
+  firstJust :: [Maybe a] -> Maybe a
+  firstJust xs = go xs Nothing
+   where
+    go [] acc = acc
+    go (x : xs_) acc = case x of
+      Just y -> Just y
+      Nothing -> go xs_ acc
+
+showAppError :: AppError -> IO ()
+showAppError (FetchError msg) = putStrLn $ "Error fetching URL: " ++ msg
+showAppError (DatabaseError msg) = putStrLn $ "Database error: " ++ msg
+showAppError (FeedParseError msg) = putStrLn $ "Error parsing feed: " ++ msg
+showAppError (ArgError msg) = putStrLn $ "Argument error: " ++ msg
+showAppError (DigestError msg) = putStrLn $ "Digest error: " ++ msg
+showAppError (NotifyError msg) = putStrLn $ "Notification error: " ++ msg
+showAppError (GeneralError msg) = putStrLn $ "Error: " ++ msg
+
+replaceSmartQuotes :: T.Text -> T.Text
+replaceSmartQuotes =
+  T.replace (T.pack "“") (T.pack "\"")
+    . T.replace (T.pack "”") (T.pack "\"")
+    . T.replace (T.pack "‘") (T.pack "'")
+    . T.replace (T.pack "’") (T.pack "'")
+
+replaceContent :: String -> String -> String -> String
+replaceContent pattern replaceWith content = T.unpack $ T.replace (T.pack pattern) (T.pack replaceWith) (T.pack content)
+
+showDay :: Day -> String
+showDay = formatTime defaultTimeLocale "%B %d, %Y"
+
+nothingIfEmpty :: (Foldable t) => t a -> Maybe (t a)
+nothingIfEmpty a = if null a then Nothing else Just a
+
+extractLinkHref :: [Tag String] -> Maybe String
+extractLinkHref tags =
+  let links = extractBetweenTag "link" tags
+   in case links of
+        (h : _) -> Just $ fromAttrib "href" h
+        _ -> Nothing
+
+extractBetweenTag :: String -> [Tag String] -> [Tag String]
+extractBetweenTag tag tags =
+  let startTag = TagOpen tag []
+      endTag = TagClose tag
+   in takeWhile (~/= endTag) $ dropWhile (~/= startTag) tags
+
+takeBetween :: String -> String -> [Tag String] -> [Tag String]
+takeBetween start end tags = takeWhile (~/= end) $ dropWhile (~/= start) tags
+
+parseURL :: String -> Maybe URL
+parseURL url = case parseURI url of
+  Just uri -> (if uriScheme uri `elem` ["http:", "https:"] then Just url else Nothing)
+  Nothing -> Nothing
+
+extractRssLinkTag :: [Tag String] -> [Tag String]
+extractRssLinkTag = filter isRssLink
+ where
+  isRssLink (TagOpen "link" attrs) = fromAttrib "type" (TagOpen "link" attrs) == "application/rss+xml"
+  isRssLink _ = False
+
+getFeedUrlFromWebsite :: String -> IO (Maybe String)
+getFeedUrlFromWebsite url = do
+  putStrLn $ "Getting contents of: " <> url
+  contents <- fetchUrl url >>= pure . (T.unpack . decodeUtf8)
+  let tags = extractRssLinkTag $ parseTags contents
+  pure $ case tags of
+    tag : _ -> Just $ fromAttrib "href" tag
+    _ -> Nothing
+
+getYtRssFeeds :: [String] -> IO [String]
+getYtRssFeeds urls = do
+  mapM getFeedUrlFromWebsite urls >>= pure . catMaybes
+
+makeRssFeedsList :: IO ()
+makeRssFeedsList = do
+  urls <- readFile "ytfeeds.list" >>= pure . lines
+  runApp $ \config ->
+    mapM_
+      ( \url -> do
+          putStrLn $ "Inserting feed: " <> url
+          insertFeed url config
+      )
+      urls
