@@ -294,12 +294,18 @@ insertFeedItem conn (feedId, feedItem@FeedItem{..}) = do
 insertFeed :: URL -> App [(Int, URL)]
 insertFeed feedUrl (Config{..}) = do
   let q = fromString "INSERT INTO feeds (title,url) VALUES (?,?);"
-  do
-    feedContents <- fetchUrl feedUrl
-    let title = extractTitleFromFeedUrl feedUrl feedContents
-    failWith DatabaseError $ withResource connPool $ \conn -> do
-      execute conn q (title, feedUrl)
-      query conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only feedUrl)
+  let q' = fromString "SELECT id from feeds where url = ?;" :: Query
+  withResource connPool $ \conn -> do
+    res <- failWith DatabaseError $ query conn q' (Only feedUrl) :: IO [FeedId]
+    if null res
+      then do
+        feedContents <- fetchUrl feedUrl
+        let title = extractTitleFromFeedUrl feedUrl feedContents
+        failWith DatabaseError $ do
+          execute conn q (title, feedUrl)
+          query conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only feedUrl)
+      else
+        throw $ GeneralError "Looks like you have this feed already."
 
 getFeedUrlsFromDB :: App [(Int, URL)]
 getFeedUrlsFromDB (Config{..}) = failWith DatabaseError $ withResource connPool handleQuery

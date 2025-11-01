@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.3.3
+
+- Check for duplicates before trying to add a feed.
+
 ## v0.3.2
 
 - Fix an unhandled error condition when sending a telegram notification fails.
