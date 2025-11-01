@@ -257,8 +257,9 @@ extractFeedItem tags =
       linkFromYtFeed = extractLinkHref tags -- youtube specific
       link = nothingIfEmpty . getInnerText $ takeBetween "<link>" "</link>" tags
       pubDate = nothingIfEmpty . getInnerText $ takeBetween "<pubDate>" "</pubDate>" tags
+      publishedDate = nothingIfEmpty . getInnerText $ takeBetween "<published>" "</published>" tags
       updatedDate = nothingIfEmpty . getInnerText $ takeBetween "<updated>" "</updated>" tags
-      updated = pubDate <|> updatedDate
+      updated = pubDate <|> publishedDate <|> updatedDate
    in FeedItem{title = title, link = link <|> linkFromYtFeed, updated = updated >>= parseDate}
 
 insertFeedItem :: Connection -> (Int, FeedItem) -> IO (Maybe FeedItem)
