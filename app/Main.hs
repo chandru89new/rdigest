@@ -11,9 +11,9 @@
 module Main where
 
 import Control.Applicative ((<|>))
-import Control.Concurrent (threadDelay)
 import Control.Exception (Exception, SomeException, evaluate, throw, try)
 import Control.Monad (forM_, unless, when)
+import Control.Monad.Trans.Reader (ReaderT (runReaderT))
 import Data.Aeson (ToJSON (toJSON), object, (.=))
 import qualified Data.Aeson.Key as AKey
 import qualified Data.ByteString.Char8 as BS
@@ -53,7 +53,6 @@ data Command
   | PurgeEverything
   | CreateDayDigest [ArgPair]
   | CreateRangeDigest [ArgPair]
-  | Notify
   | ShowVersion
   | ShowHelp
   | InvalidCommand
@@ -70,7 +69,7 @@ data AppError
   deriving (Show)
 
 data Config = Config
-  {connPool :: Pool Connection, template :: String, indexTemplate :: String, rdigestPath :: String, token :: Maybe String, channelId :: Maybe String}
+  {connPool :: Pool Connection, template :: String, indexTemplate :: String, rdigestPath :: String}
 
 data FeedItem = FeedItem {title :: String, link :: Maybe String, updated :: Maybe Day} deriving (Eq, Show)
 
@@ -79,6 +78,8 @@ data Feed = Feed {url :: String, name :: String} deriving (Show)
 newtype FeedId = FeedId Int deriving (Show)
 
 type App a = Config -> IO a
+
+type AppM a = ReaderT Config IO a
 
 data FeedItemWithMeta = FeedItemWithMeta {feedItem :: FeedItem, feedTitle :: String, feedURL :: URL} deriving (Show)
 
@@ -187,7 +188,6 @@ main' command =
           _ <- runApp destroyDB
           putStrLn "Fin."
         else putStrLn "I have cancelled it."
-    Notify -> runApp sendDigest
     ShowVersion -> putStrLn ("rdigest v" ++ showVersion version)
     ShowHelp -> putStrLn progHelp
     InvalidCommand -> do
@@ -209,7 +209,6 @@ progHelp =
   \  list feeds - List all feeds.\n\
   \  refresh - Refresh all feeds.\n\
   \  refresh <feed_url> - Refresh feed at <feed_url>. The <feed_url> must already be in your database.\n\
-  \  notify - Send digest notification to Telegram (experimental). Check docs for setting this up.\n\
   \  purge - Purge everything.\n"
 
 getCommand :: IO Command
@@ -227,7 +226,6 @@ getCommand = do
     ("digest" : "--for" : dayString : _) -> CreateDayDigest $ groupCommandArgs ["--for", dayString]
     ("digest" : xs) -> CreateRangeDigest $ groupCommandArgs xs
     ("purge" : _) -> PurgeEverything
-    ("notify" : _) -> Notify
     ("version" : _) -> ShowVersion
     ("--version" : _) -> ShowVersion
     _ -> InvalidCommand
@@ -611,7 +609,6 @@ runApp app = do
   let template = $(embedFile "./template.html")
       indexTemplate = $(embedFile "./index-template.html")
   rdigestPath <- lookupEnv "RDIGEST_FOLDER"
-  botToken <- lookupEnv "TG_TOKEN"
   channelId <- lookupEnv "TG_CHANNEL_ID"
   chatId <- lookupEnv "TG_CHAT_ID" -- backwards compatibility
   chanId <- lookupEnv "TG_CHAN_ID" -- backwards compatibility
@@ -620,47 +617,28 @@ runApp app = do
     Nothing -> showAppError $ GeneralError "It looks like you have not set the RDIGEST_FOLDER env. `export RDIGEST_FOLDER=<full-path-where-rdigest-should-save-data>"
     Just rdPath -> do
       pool <- newPool (defaultPoolConfig (open (getDBFile rdPath)) close 60.0 10)
-      let config = Config{connPool = pool, template = BS.unpack template, rdigestPath = rdPath, indexTemplate = BS.unpack indexTemplate, token = botToken, channelId = _channelId}
+      let config = Config{connPool = pool, template = BS.unpack template, rdigestPath = rdPath, indexTemplate = BS.unpack indexTemplate}
       res <- (try :: IO a -> IO (Either AppError a)) $ app config
       destroyAllResources pool
       either showAppError (const $ return ()) res
 
-sendDigest :: App ()
-sendDigest Config{..} = withResource connPool $ \conn -> do
-  case (token, channelId) of
-    (Just token_, Just channelId_) -> do
-      linksToSend <- getUnsentLinks conn
-      let chunks = chunksOf 20 linksToSend
-          totalChunks = length chunks
-      forM_ (zip [1 ..] chunks) $ \(index, chunk) -> do
-        forM_ chunk $ \item -> do
-          res <- (try :: IO a -> IO (Either AppError a)) $ do
-            putStrLn $ "Sending link: " ++ snd item
-            sendMessage item token_ channelId_
-            markAsSent conn item
-          case res of
-            Left e -> print e
-            Right _ -> pure ()
-        when (index < totalChunks) $ threadDelay (toMicroseconds 65)
-    _ -> do
-      throw $ NotifyError "You have not set the TG_TOKEN and/or the TG_CHANNEL_ID env var."
-
-getUnsentLinks :: Connection -> IO [(String, URL)]
-getUnsentLinks conn = query' conn (fromString "select title, link from feed_items where state = 'unsent' OR state = 'unread' order by feed_id;") () :: IO [(String, URL)]
-
-sendMessage :: (String, URL) -> String -> String -> IO ()
-sendMessage (title, url) token channelId = failWith NotifyError $ do
-  let json =
-        TgMsg
-          { chat_id = channelId
-          , text = title ++ " (" ++ url ++ ")"
-          , link_preview_options = LinkPreviewOptions{link_url = url}
-          }
-  _ <- postJSON ("https://api.telegram.org/bot" ++ token ++ "/sendMessage") json
-  pure ()
-
-markAsSent :: Connection -> (String, URL) -> IO ()
-markAsSent conn (_, url) = execute' conn (fromString "update feed_items set state = 'sent' where link = ?;") (Only url)
+runAppM :: AppM a -> IO ()
+runAppM app = do
+  let template = $(embedFile "./template.html")
+      indexTemplate = $(embedFile "./index-template.html")
+  rdigestPath <- lookupEnv "RDIGEST_FOLDER"
+  channelId <- lookupEnv "TG_CHANNEL_ID"
+  chatId <- lookupEnv "TG_CHAT_ID" -- backwards compatibility
+  chanId <- lookupEnv "TG_CHAN_ID" -- backwards compatibility
+  let _channelId = channelId <|> chatId <|> chanId
+  case rdigestPath of
+    Nothing -> showAppError $ GeneralError "It looks like you have not set the RDIGEST_FOLDER env. `export RDIGEST_FOLDER=<full-path-where-rdigest-should-save-data>"
+    Just rdPath -> do
+      pool <- newPool (defaultPoolConfig (open (getDBFile rdPath)) close 60.0 10)
+      let config = Config{connPool = pool, template = BS.unpack template, rdigestPath = rdPath, indexTemplate = BS.unpack indexTemplate}
+      res <- (try :: IO a -> IO (Either AppError a)) $ runReaderT app config
+      destroyAllResources pool
+      either showAppError (const $ return ()) res
 
 postJSON :: String -> TgMsg -> IO BS.ByteString
 postJSON url jsonBody = do
