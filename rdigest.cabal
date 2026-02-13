@@ -30,7 +30,7 @@ executable rdigest
     import:           warnings
     main-is:          Main.hs
 
-    other-modules:     Paths_rdigest, Server, Types
+    other-modules:     Paths_rdigest, Server, Types, Utils, DB
     -- other-extensions:
     build-depends:      base,
                         tagsoup,

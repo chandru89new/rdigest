@@ -2,6 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Use section" #-}
@@ -15,7 +16,6 @@ module Types where
 import Control.Exception
 import Control.Monad.Trans.Reader
 import Data.Aeson
-import Data.Aeson.Key
 import Data.Pool
 import Data.Time
 import Database.SQLite.Simple
@@ -58,6 +58,9 @@ data Feed = Feed {url :: String, name :: String} deriving (Show)
 
 newtype FeedId = FeedId Int deriving (Show)
 
+instance FromJSON FeedId where
+  parseJSON = withObject "FeedId" $ \v -> FeedId <$> v .: "id"
+
 type App a = Config -> IO a
 
 type AppM a = ReaderT Config IO a
@@ -85,14 +88,14 @@ instance FromRow FeedId where
 instance ToJSON TgMsg where
   toJSON tgMsg =
     object
-      [ fromString "chat_id" .= chat_id tgMsg
-      , fromString "text" .= text tgMsg
-      , fromString "link_preview_options" .= object [fromString "url" .= link_url (link_preview_options tgMsg)]
+      [ "chat_id" .= chat_id tgMsg
+      , "text" .= text tgMsg
+      , "link_preview_options" .= object ["url" .= link_url (link_preview_options tgMsg)]
       ]
 
-data Resource = Health | Echo | Feeds | InvalidResource deriving (Show)
+data Resource = Health | Echo | Feeds | Links | InvalidResource deriving (Show)
 
-data Action = Test | Add | InvalidAction deriving (Show)
+data Action = Test | Add | List | Get | Remove | InvalidAction deriving (Show)
 
 data RpcRequest = RpcRequest
   { reqResource :: Resource
@@ -118,12 +121,16 @@ instance FromJSON Resource where
     "health" -> pure Health
     "echo" -> pure Echo
     "feeds" -> pure Feeds
+    "links" -> pure Links
     _ -> pure InvalidResource
 
 instance FromJSON Action where
   parseJSON = withText "Action" $ \r -> case r of
     "test" -> pure Test
     "add" -> pure Add
+    "list" -> pure List
+    "get" -> pure Get
+    "remove" -> pure Remove
     _ -> pure InvalidAction
 
 instance FromJSON RpcRequest where
@@ -136,3 +143,57 @@ instance FromJSON RpcRequest where
 
 instance FromJSON AddFeedReq where
   parseJSON = withObject "AddFeedReq" (\v -> AddFeedReq <$> v .: "urls")
+
+data ListFeedsResponse = ListFeedsResponse
+  { lfrId :: Int
+  , lfrTitle :: Maybe String
+  , lfrUrl :: String
+  }
+  deriving (Show)
+
+instance FromRow ListFeedsResponse where
+  fromRow = ListFeedsResponse <$> field <*> field <*> field
+
+instance ToJSON ListFeedsResponse where
+  toJSON (ListFeedsResponse{..}) =
+    object
+      [ "id" .= lfrId
+      , "url" .= lfrUrl
+      , "title" .= lfrTitle
+      ]
+
+data PageParams = PageParams
+  { pageLimit :: Maybe Int
+  , pageOffset :: Maybe Int
+  }
+
+instance FromJSON PageParams where
+  parseJSON = withObject "PageParams" $ \v ->
+    PageParams <$> v .:? "limit" <*> v .:? "offset"
+
+instance ToJSON PageParams where
+  toJSON PageParams{..} = object ["limit" .= pageLimit, "offset" .= pageOffset]
+
+data FeedLinksResponse = FeedLinksResponse
+  { fiLink :: String
+  , fiTitle :: String
+  , fiUpdated :: String
+  }
+
+instance FromRow FeedLinksResponse where
+  fromRow = FeedLinksResponse <$> field <*> field <*> field
+
+instance ToJSON FeedLinksResponse where
+  toJSON FeedLinksResponse{..} = object ["url" .= fiLink, "title" .= fiTitle, "updated" .= fiUpdated]
+
+data ApiErrorObject = ApiErrorObject
+  { errorType :: String
+  , errorMsg :: String
+  }
+
+instance ToJSON ApiErrorObject where
+  toJSON ApiErrorObject{..} =
+    object
+      [ "type" .= errorType
+      , "message" .= errorMsg
+      ]

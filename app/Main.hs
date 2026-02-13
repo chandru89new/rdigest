@@ -14,6 +14,7 @@ import Control.Applicative ((<|>))
 import Control.Exception (SomeException, evaluate, throw, try)
 import Control.Monad (forM_, unless, when)
 import Control.Monad.Trans.Reader (ReaderT (runReaderT))
+import DB
 import qualified Data.ByteString.Char8 as BS
 import Data.CaseInsensitive (mk)
 import Data.Either (fromLeft, fromRight, isLeft, isRight)
@@ -35,9 +36,10 @@ import Server (startServer)
 import System.Directory (getDirectoryContents)
 import System.Environment (getArgs, lookupEnv)
 import System.IO (hFlush, stdout)
-import Text.HTML.TagSoup (Tag (..), fromAttrib, innerText, parseTags, partitions, (~/=), (~==))
+import Text.HTML.TagSoup (Tag (..), fromAttrib, parseTags, partitions, (~/=), (~==))
 import Text.Read (readMaybe)
 import Types
+import Utils
 
 -- TYPES
 
@@ -62,7 +64,7 @@ main' command =
       case url of
         Just _url -> do
           runApp $ \config -> do
-            res <- insertFeed _url config
+            res <- insertFeed' _url config
             unless (null res) $ do
               putStrLn $ "I have added the feed: " ++ link ++ "."
             processFeeds res config
@@ -165,12 +167,6 @@ getCommand = do
     ("start" : _) -> StartServer (Just 5500)
     _ -> InvalidCommand
 
-fetchUrl :: String -> IO BS.ByteString
-fetchUrl url = failWith FetchError $ do
-  req <- parseRequest url
-  let withHeader = setRequestHeader (mk $ BS.pack "User-Agent") [BS.pack "Mozilla/5.0"] req
-  httpBS withHeader >>= pure . getResponseBody
-
 extractFeedItems :: BS.ByteString -> Maybe [FeedItem]
 extractFeedItems = parseContents
  where
@@ -204,20 +200,11 @@ insertFeedItem conn (feedId, feedItem@FeedItem{..}) = do
       _ <- execute' conn insertFeedQuery $ toRow (title, link, updated, feedId) :: IO ()
       pure (Just feedItem)
 
-insertFeed :: URL -> App [(Int, URL)]
-insertFeed feedUrl (Config{..}) = do
-  let q = fromString "INSERT INTO feeds (title,url) VALUES (?,?);"
-  let q' = fromString "SELECT id from feeds where url = ?;" :: Query
+insertFeed' :: URL -> App [(Int, URL)]
+insertFeed' feedUrl (Config{..}) = do
   withResource connPool $ \conn -> do
-    res <- query' conn q' (Only feedUrl) :: IO [FeedId]
-    if null res
-      then do
-        feedContents <- fetchUrl feedUrl
-        let title = extractTitleFromFeedUrl feedUrl feedContents
-        execute' conn q (title, feedUrl)
-        query' conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only feedUrl)
-      else
-        throw $ GeneralError "Looks like you have this feed already."
+    res <- insertFeed feedUrl conn
+    pure [res]
 
 getFeedUrlsFromDB :: App [(Int, URL)]
 getFeedUrlsFromDB (Config{..}) = failWith DatabaseError $ withResource connPool handleQuery
@@ -430,9 +417,6 @@ refreshFeed url config@Config{..} = do
     (feedId, _) : _ -> do
       processFeeds [(feedId, url)] config
 
-getDBFile :: String -> String
-getDBFile = (++ "/rdigest.db")
-
 runMultipleQueries :: Connection -> MultipleQueries -> IO ()
 runMultipleQueries conn (MultipleQueries queries) = do
   let qs = filter (not . T.null) $ map T.strip $ T.splitOn (T.pack ";") (T.pack queries)
@@ -454,13 +438,6 @@ updateFeedTitle conn (feedId, url) = do
   contents <- fetchUrl url
   let title = extractTitleFromFeedUrl url contents
   execute conn q (title, feedId)
-
-extractTitleFromFeedUrl :: URL -> BS.ByteString -> String
-extractTitleFromFeedUrl url contents =
-  let tags = parseTags (T.unpack $ decodeUtf8 contents)
-   in case getInnerText $ takeBetween "<title>" "</title>" tags of
-        "" -> url
-        x -> x
 
 checkIfTitleColumnExists :: App Bool
 checkIfTitleColumnExists Config{..} = failWith DatabaseError $ do
@@ -591,37 +568,12 @@ postJSON url jsonBody = do
 
 -- UTILS
 
-failWith :: (String -> AppError) -> IO a -> IO a
-failWith mkError action = do
-  res <- try action
-  case res of
-    Left (e :: SomeException) -> (throw . mkError . show) e
-    Right v -> pure v
-
-query' :: (ToRow a, FromRow r) => Connection -> Query -> a -> IO [r]
-query' conn q = failWith DatabaseError . query conn q
-
-query_' :: (FromRow r) => Connection -> Query -> IO [r]
-query_' conn = failWith DatabaseError . query_ conn
-
-execute' :: (ToRow a) => Connection -> Query -> a -> IO ()
-execute' conn q = failWith DatabaseError . execute conn q
-
-execute_' :: Connection -> Query -> IO ()
-execute_' conn = failWith DatabaseError . execute_ conn
-
 chunksOf :: Int -> [a] -> [[a]]
 chunksOf _ [] = []
 chunksOf n xs = take n xs : chunksOf n (drop n xs)
 
 toMicroseconds :: Int -> Int
 toMicroseconds x = x * 1000 * 1000
-
-trim :: String -> String
-trim = T.unpack . T.strip . T.pack
-
-getInnerText :: [Tag String] -> String
-getInnerText = trim . innerText
 
 justRunQuery :: Connection -> Query -> IO ()
 justRunQuery conn q = do
@@ -684,9 +636,6 @@ extractBetweenTag tag tags =
       endTag = TagClose tag
    in takeWhile (~/= endTag) $ dropWhile (~/= startTag) tags
 
-takeBetween :: String -> String -> [Tag String] -> [Tag String]
-takeBetween start end tags = takeWhile (~/= end) $ dropWhile (~/= start) tags
-
 parseURL :: String -> Maybe URL
 parseURL url = case parseURI url of
   Just uri -> (if uriScheme uri `elem` ["http:", "https:"] then Just url else Nothing)
@@ -718,6 +667,6 @@ makeRssFeedsList = do
     mapM_
       ( \url -> do
           putStrLn $ "Inserting feed: " <> url
-          insertFeed url config
+          insertFeed' url config
       )
       urls
