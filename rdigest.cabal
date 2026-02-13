@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               rdigest
-version:            0.3.3
+version:            0.3.4
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -30,7 +30,7 @@ executable rdigest
     import:           warnings
     main-is:          Main.hs
 
-    other-modules:     Paths_rdigest
+    other-modules:     Paths_rdigest, Server, Types
     -- other-extensions:
     build-depends:      base,
                         tagsoup,
@@ -45,7 +45,9 @@ executable rdigest
                         file-embed,
                         case-insensitive,
                         directory,
-                        aeson
+                        aeson,
+                        scotty,
+                        http-types
     hs-source-dirs:   app
     default-language: Haskell2010
-    ghc-options: -Wall -Wincomplete-patterns
+    ghc-options: -Wall -Wincomplete-patterns -threaded

@@ -6,3 +6,6 @@ debug-build:
 
 clean-build:
 	cabal clean && make build
+
+bstart:
+	make build && ./release/rdigest start

@@ -11,11 +11,9 @@
 module Main where
 
 import Control.Applicative ((<|>))
-import Control.Exception (Exception, SomeException, evaluate, throw, try)
+import Control.Exception (SomeException, evaluate, throw, try)
 import Control.Monad (forM_, unless, when)
 import Control.Monad.Trans.Reader (ReaderT (runReaderT))
-import Data.Aeson (ToJSON (toJSON), object, (.=))
-import qualified Data.Aeson.Key as AKey
 import qualified Data.ByteString.Char8 as BS
 import Data.CaseInsensitive (mk)
 import Data.Either (fromLeft, fromRight, isLeft, isRight)
@@ -23,91 +21,25 @@ import Data.FileEmbed (embedFile)
 import Data.List (intercalate, isInfixOf, isSuffixOf, sortBy)
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Data.Ord (Down (Down), comparing)
-import Data.Pool (Pool, defaultPoolConfig, destroyAllResources, newPool, withResource)
+import Data.Pool (defaultPoolConfig, destroyAllResources, newPool, withResource)
 import Data.String (IsString (fromString))
 import qualified Data.Text as T (Text, null, pack, replace, splitOn, strip, unpack)
 import Data.Text.Encoding (decodeUtf8)
 import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, formatTime, parseTimeM)
 import Data.Version (showVersion)
-import Database.SQLite.Simple (Connection, FromRow (fromRow), Only (Only), Query, ToRow, close, execute, execute_, field, open, query, query_, toRow, withTransaction)
+import Database.SQLite.Simple (Connection, FromRow (..), Only (Only), Query, ToRow, close, execute, execute_, open, query, query_, toRow, withTransaction)
 import Network.HTTP.Simple (getResponseBody, getResponseStatusCode, httpBS, parseRequest, setRequestBodyJSON, setRequestHeader, setRequestMethod)
 import Network.URI (URI (uriAuthority, uriScheme), URIAuth (..), parseURI)
 import Paths_rdigest (version)
+import Server (startServer)
 import System.Directory (getDirectoryContents)
 import System.Environment (getArgs, lookupEnv)
 import System.IO (hFlush, stdout)
 import Text.HTML.TagSoup (Tag (..), fromAttrib, innerText, parseTags, partitions, (~/=), (~==))
+import Text.Read (readMaybe)
+import Types
 
 -- TYPES
-
-type URL = String
-
-data Command
-  = Init
-  | AddFeed URL
-  | RefreshFeed URL
-  | RefreshFeeds
-  | ListFeeds
-  | RemoveFeed URL
-  | UpdateAllDigests
-  | PurgeEverything
-  | CreateDayDigest [ArgPair]
-  | CreateRangeDigest [ArgPair]
-  | ShowVersion
-  | ShowHelp
-  | InvalidCommand
-  deriving (Eq)
-
-data AppError
-  = FetchError String
-  | DatabaseError String
-  | FeedParseError String
-  | ArgError String
-  | DigestError String
-  | GeneralError String
-  | NotifyError String
-  deriving (Show)
-
-data Config = Config
-  {connPool :: Pool Connection, template :: String, indexTemplate :: String, rdigestPath :: String}
-
-data FeedItem = FeedItem {title :: String, link :: Maybe String, updated :: Maybe Day} deriving (Eq, Show)
-
-data Feed = Feed {url :: String, name :: String} deriving (Show)
-
-newtype FeedId = FeedId Int deriving (Show)
-
-type App a = Config -> IO a
-
-type AppM a = ReaderT Config IO a
-
-data FeedItemWithMeta = FeedItemWithMeta {feedItem :: FeedItem, feedTitle :: String, feedURL :: URL} deriving (Show)
-
-type ArgPair = (String, ArgVal)
-
-data ArgVal = ArgBool Bool | ArgString String deriving (Eq, Show)
-
-data TgMsg = TgMsg {chat_id :: String, text :: String, link_preview_options :: LinkPreviewOptions}
-
-newtype LinkPreviewOptions = LinkPreviewOptions {link_url :: String}
-
-newtype MultipleQueries = MultipleQueries String
-
-instance Exception AppError
-
-instance FromRow FeedItem where
-  fromRow = FeedItem <$> field <*> field <*> field
-
-instance FromRow FeedId where
-  fromRow = FeedId <$> field
-
-instance ToJSON TgMsg where
-  toJSON tgMsg =
-    object
-      [ AKey.fromString "chat_id" .= chat_id tgMsg
-      , AKey.fromString "text" .= text tgMsg
-      , AKey.fromString "link_preview_options" .= object [AKey.fromString "url" .= link_url (link_preview_options tgMsg)]
-      ]
 
 -- MAIN
 
@@ -190,6 +122,7 @@ main' command =
         else putStrLn "I have cancelled it."
     ShowVersion -> putStrLn ("rdigest v" ++ showVersion version)
     ShowHelp -> putStrLn progHelp
+    StartServer port -> startServer (fromMaybe 5500 port)
     InvalidCommand -> do
       putStrLn "I could not recognize that command. Try `rdigest help`."
 
@@ -228,6 +161,8 @@ getCommand = do
     ("purge" : _) -> PurgeEverything
     ("version" : _) -> ShowVersion
     ("--version" : _) -> ShowVersion
+    ("start" : port : _) -> StartServer (readMaybe port :: Maybe Int)
+    ("start" : _) -> StartServer (Just 5500)
     _ -> InvalidCommand
 
 fetchUrl :: String -> IO BS.ByteString
