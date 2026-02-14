@@ -94,22 +94,19 @@ main' command =
       putStrLn "I could not recognize that command. Try `rdigest help`."
 
 -- FUNCTIONS
-
 progHelp :: String
 progHelp =
   "Usage: rdigest <command> [args]\n\
   \Commands:\n\
-  \  help - Show this help.\n\
-  \  version - Show version info.\n\
-  \  add <feed_url> - Add a feed. <feed_url> must be valid HTTP(S) URL.\n\
-  \  remove <feed_url> - Remove a feed and all its associated posts with the given url.\n\
-  \  digest - Generate/update all daily digests.\n\
-  \  digest --for <date> - Generate the digest for the given date. Date in the YYYY-MM-DD format.\n\
-  \  digest --from <start_date> --to <end_date> - Generate digests for each day (one digest per day) in the given date range. It only generates digests for dates for which posts exists in the database. Dates in the YYYY-MM-DD format.\n\
-  \  list feeds - List all feeds.\n\
-  \  refresh - Refresh all feeds.\n\
-  \  refresh <feed_url> - Refresh feed at <feed_url>. The <feed_url> must already be in your database.\n\
-  \  purge - Purge everything.\n"
+  \  help                  - Show this help.\n\
+  \  version               - Show version info.\n\
+  \  init                  - Initialize the database.\n\
+  \  feeds add <url>       - Add a feed. <url> must be valid HTTP(S) URL.\n\
+  \  feeds remove <url>    - Remove a feed and all its associated posts.\n\
+  \  feeds list            - List all feeds.\n\
+  \  feeds update          - Update/refresh all feeds.\n\
+  \  digest [offset]       - Show a digest by offset (1 = latest, 2 = previous, etc.). Optional. If no offset given, 1 is assumed.\n\
+  \  start [port]          - Start the API server on the given port or on 5500.\n"
 
 getCommand :: IO Command
 getCommand = do
@@ -123,14 +120,6 @@ getCommand = do
       ("list" : _) -> ListFeeds
       ["update"] -> UpdateFeeds
       _ -> InvalidCommand
-    -- ("add" : url : _) -> AddFeed url
-    -- ("remove" : url : _) -> RemoveFeed url
-    -- ("list" : "feeds" : _) -> ListFeeds
-    -- ["refresh"] -> RefreshFeeds
-    -- ["digest"] -> UpdateAllDigests
-    -- ("digest" : "--for" : dayString : _) -> CreateDayDigest $ groupCommandArgs ["--for", dayString]
-    -- ("digest" : xs) -> CreateRangeDigest $ groupCommandArgs xs
-    -- ("purge" : _) -> PurgeEverything
     ("digest" : rest) -> case rest of
       [] -> ShowDigest (Just 1)
       (offset : _) -> ShowDigest (readMaybe offset :: Maybe Int)
