@@ -11,24 +11,25 @@
 module Main where
 
 import Control.Applicative ((<|>))
-import Control.Exception (SomeException, evaluate, throw, try)
+import Control.Exception (evaluate, throw, try)
 import Control.Monad (forM_, unless, when)
-import Control.Monad.Trans.Reader (ReaderT (runReaderT))
+import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Monad.Trans.Reader (ReaderT (runReaderT), ask)
 import DB
 import qualified Data.ByteString.Char8 as BS
 import Data.CaseInsensitive (mk)
 import Data.Either (fromLeft, fromRight, isLeft, isRight)
-import Data.FileEmbed (embedFile)
+import Data.FileEmbed
 import Data.List (intercalate, isInfixOf, isSuffixOf, sortBy)
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Data.Ord (Down (Down), comparing)
 import Data.Pool (defaultPoolConfig, destroyAllResources, newPool, withResource)
 import Data.String (IsString (fromString))
-import qualified Data.Text as T (Text, null, pack, replace, splitOn, strip, unpack)
+import qualified Data.Text as T (Text, pack, replace, unpack)
 import Data.Text.Encoding (decodeUtf8)
 import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, formatTime, parseTimeM)
 import Data.Version (showVersion)
-import Database.SQLite.Simple (Connection, FromRow (..), Only (Only), Query, ToRow, close, execute, execute_, open, query, query_, toRow, withTransaction)
+import Database.SQLite.Simple (Connection, Only (Only, fromOnly), Query, close, open, query_, toRow, withTransaction)
 import Network.HTTP.Simple (getResponseBody, getResponseStatusCode, httpBS, parseRequest, setRequestBodyJSON, setRequestHeader, setRequestMethod)
 import Network.URI (URI (uriAuthority, uriScheme), URIAuth (..), parseURI)
 import Paths_rdigest (version)
@@ -38,6 +39,7 @@ import System.Environment (getArgs, lookupEnv)
 import System.IO (hFlush, stdout)
 import Text.HTML.TagSoup (Tag (..), fromAttrib, parseTags, partitions, (~/=), (~==))
 import Text.Read (readMaybe)
+import Text.StringLike (StringLike (toString))
 import Types
 import Utils
 
@@ -54,76 +56,36 @@ main' :: Command -> IO ()
 main' command =
   case command of
     Init -> do
-      runApp $ \config -> do
-        putStrLn "Initializing rdigest..."
-        putStrLn "If you ran this already, do not worry: all your current `rdigest` data is safe."
-        initDB config
-        putStrLn "Done."
+      runAppM $ do
+        liftIO $ do
+          putStrLn "Initializing rdigest..."
+          putStrLn "If you ran this already, do not worry: all your current `rdigest` data is safe."
+        initDB
+        liftIO $ putStrLn "Done."
     AddFeed link -> do
       let url = parseURL link
       case url of
         Just _url -> do
-          runApp $ \config -> do
-            res <- insertFeed' _url config
-            unless (null res) $ do
+          runAppM $ do
+            res <- insertFeed' _url
+            liftIO $ unless (null res) $ do
               putStrLn $ "I have added the feed: " ++ link ++ "."
-            processFeeds res config
+            liftIO $ processFeeds res
         Nothing -> putStrLn "I am not able to parse the URL. Please provide a valid URL."
-    RemoveFeed url -> runApp $ \config -> do
-      input <- userConfirmation "This will remove the feed and all the posts associated with it."
+    RemoveFeed url -> runAppM $ do
+      input <- liftIO $ userConfirmation "This will remove the feed and all the posts associated with it."
       if input
         then do
-          removeFeed url config
-          putStrLn "Removed."
-        else putStrLn "I have cancelled it."
-    ListFeeds -> runApp $ \config -> do
-      feeds <- listFeeds config
-      putStrLn $ intercalate "\n" (map (\(title, url) -> fromMaybe url title ++ " (" ++ url ++ ")") feeds)
-    RefreshFeed url -> do
-      runApp $ \config -> do
-        refreshFeed url config
-        putStrLn "I have refreshed the feed."
-        main' UpdateAllDigests
-    RefreshFeeds -> do
-      runApp $ \config -> do
-        _ <- updateAllFeeds config
-        putStrLn "I have refreshed all the feeds."
-        main' UpdateAllDigests
-    UpdateAllDigests -> do
-      runApp $ \config -> do
-        updateAllDigests config
-        updateIndexFile config
-    CreateDayDigest argPairs -> do
-      for <- pure $ extractArgString "--for" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
-      runApp $ \config -> case for of
-        Just d -> do
-          items <- createDigest d config
-          if null items
-            then putStrLn $ "I can't create a digest for " ++ showDay d ++ ". There are no posts to make a digest out of."
-            else do
-              putStrLn $ "I am now preparing digest for " ++ showDay d ++ ". Give me a few seconds..."
-              file <- writeDigest config d items
-              putStrLn $ "I have saved the digest file at " ++ file ++ "."
-              updateIndexFile config
-        _ -> showAppError $ ArgError "I couldn't understand the date value. Provide a valid date in the YYYY-MM-DD format. Type 'rdigest help' for more information."
-    CreateRangeDigest argPairs -> do
-      from <- pure $ extractArgString "--from" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
-      to <- pure $ extractArgString "--to" argPairs >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" :: IO (Maybe Day)
-      case (from, to) of
-        (Just s, Just e) -> runApp $ \config -> do
-          createDigestForDateRange s e config
-          updateIndexFile config
-        (_, _) -> showAppError $ ArgError "I couldn't understand the date range values. Provide a valid date range in the YYYY-MM-DD format. Type 'rdigest help' for more information."
-    PurgeEverything -> do
-      input <- userConfirmation "This will remove all feeds and all the posts associated with them."
-      if input
-        then do
-          putStrLn "Nuking everything..."
-          _ <- runApp destroyDB
-          putStrLn "Fin."
-        else putStrLn "I have cancelled it."
+          removeFeed' url
+          liftIO $ putStrLn "Removed."
+        else liftIO $ putStrLn "I have cancelled it."
+    ListFeeds -> runAppM $ do
+      feeds <- listFeeds
+      liftIO $ putStrLn $ intercalate "\n" (map (\(title, url) -> fromMaybe url title ++ " (" ++ url ++ ")") feeds)
     ShowVersion -> putStrLn ("rdigest v" ++ showVersion version)
     ShowHelp -> putStrLn progHelp
+    CreateDigest -> undefined
+    ExportDigest -> undefined
     StartServer port -> startServer (fromMaybe 5500 port)
     InvalidCommand -> do
       putStrLn "I could not recognize that command. Try `rdigest help`."
@@ -152,15 +114,24 @@ getCommand = do
   pure $ case args of
     ("help" : _) -> ShowHelp
     ("init" : _) -> Init
-    ("add" : url : _) -> AddFeed url
-    ("remove" : url : _) -> RemoveFeed url
-    ("list" : "feeds" : _) -> ListFeeds
-    ("refresh" : url : _) -> RefreshFeed url
-    ["refresh"] -> RefreshFeeds
-    ["digest"] -> UpdateAllDigests
-    ("digest" : "--for" : dayString : _) -> CreateDayDigest $ groupCommandArgs ["--for", dayString]
-    ("digest" : xs) -> CreateRangeDigest $ groupCommandArgs xs
-    ("purge" : _) -> PurgeEverything
+    ("feeds" : rest) -> case rest of
+      ("add" : url : _) -> AddFeed url
+      ("remove" : url : _) -> RemoveFeed url
+      ("list" : _) -> ListFeeds
+      _ -> InvalidCommand
+    ("digest" : rest) -> case rest of
+      ["create"] -> CreateDigest
+      ["export"] -> ExportDigest
+      _ -> InvalidCommand
+    -- ("add" : url : _) -> AddFeed url
+    -- ("remove" : url : _) -> RemoveFeed url
+    -- ("list" : "feeds" : _) -> ListFeeds
+    -- ("refresh" : url : _) -> RefreshFeed url
+    -- ["refresh"] -> RefreshFeeds
+    -- ["digest"] -> UpdateAllDigests
+    -- ("digest" : "--for" : dayString : _) -> CreateDayDigest $ groupCommandArgs ["--for", dayString]
+    -- ("digest" : xs) -> CreateRangeDigest $ groupCommandArgs xs
+    -- ("purge" : _) -> PurgeEverything
     ("version" : _) -> ShowVersion
     ("--version" : _) -> ShowVersion
     ("start" : port : _) -> StartServer (readMaybe port :: Maybe Int)
@@ -200,42 +171,24 @@ insertFeedItem conn (feedId, feedItem@FeedItem{..}) = do
       _ <- execute' conn insertFeedQuery $ toRow (title, link, updated, feedId) :: IO ()
       pure (Just feedItem)
 
-insertFeed' :: URL -> App [(Int, URL)]
-insertFeed' feedUrl (Config{..}) = do
-  withResource connPool $ \conn -> do
+insertFeed' :: URL -> AppM [(Int, URL)]
+insertFeed' feedUrl = do
+  Config{..} <- ask
+  liftIO $ withResource connPool $ \conn -> do
     res <- insertFeed feedUrl conn
     pure [res]
 
-getFeedUrlsFromDB :: App [(Int, URL)]
-getFeedUrlsFromDB (Config{..}) = failWith DatabaseError $ withResource connPool handleQuery
+getFeedUrlsFromDB :: AppM [(Int, URL)]
+getFeedUrlsFromDB = do
+  Config{..} <- ask
+  liftIO $ failWith DatabaseError $ withResource connPool handleQuery
  where
   handleQuery :: Connection -> IO [(Int, URL)]
   handleQuery conn = do
     query_ conn selectUrlFromFeeds :: IO [(Int, String)]
 
-createFeedItemsTable :: Query
-createFeedItemsTable =
-  fromString
-    "CREATE TABLE IF NOT EXISTS feed_items (\
-    \ link TEXT NOT NULL PRIMARY KEY, \
-    \ title TEXT NOT NULL, \
-    \ updated DATETIME DEFAULT CURRENT_TIMESTAMP, \
-    \ state TEXT DEFAULT 'unsent',  \
-    \ feed_id INTEGER NOT NULL,  \
-    \ FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE \
-    \);"
-
-createFeedsTable :: Query
-createFeedsTable =
-  fromString
-    "CREATE TABLE IF NOT EXISTS feeds (\
-    \ id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, \
-    \ url TEXT NOT NULL UNIQUE, \
-    \ state TEXT DEFAULT 'enabled' \
-    \);"
-
 selectUrlFromFeeds :: Query
-selectUrlFromFeeds = fromString "SELECT id, url FROM feeds where state = 'enabled';"
+selectUrlFromFeeds = fromString "SELECT id, url FROM feeds;"
 
 selectAllFeeds :: Query
 selectAllFeeds = fromString "SELECT title, url FROM feeds order by title asc;"
@@ -246,10 +199,11 @@ queryToCheckIfItemExists = fromString "select link, title, updated from feed_ite
 insertFeedQuery :: Query
 insertFeedQuery = fromString "INSERT INTO feed_items (title, link, updated, feed_id) VALUES (?, ?, ?, ?);" :: Query
 
-processFeed :: (Int, URL) -> App ()
-processFeed (feedId, url) (Config{..}) = do
-  putStrLn $ "Processing: " ++ url
-  withResource connPool $ \conn -> do
+processFeed :: (Int, URL) -> AppM ()
+processFeed (feedId, url) = do
+  Config{..} <- ask
+  liftIO $ putStrLn $ "Processing: " ++ url
+  liftIO $ withResource connPool $ \conn -> do
     _ <- setPragmas conn
     feedIdExists <- query' conn (fromString "SELECT id FROM feeds where id = ?;") (Only feedId) :: IO [FeedId]
     when (null feedIdExists) $ throw $ DatabaseError "You have to first add this feed to your database. Try `rdigest add <url>`."
@@ -274,40 +228,33 @@ processFeed (feedId, url) (Config{..}) = do
     when (isLeft res) $ print (fromLeft (DatabaseError "I ran into an error when trying to save a feed to the database.") res)
     pure $ either (const 0) (\r -> if isJust r then 1 else 0) res
 
-processFeeds :: [(Int, URL)] -> App ()
-processFeeds urls config = do
+processFeeds :: [(Int, URL)] -> IO ()
+processFeeds urls = do
   forM_ urls $ \url -> do
-    res <- (try $ processFeed url config) :: IO (Either AppError ())
+    res <- try' $ runAppM $ processFeed url
     case res of
       Left e -> showAppError e
       Right _ -> pure ()
 
-updateAllFeeds :: App ()
-updateAllFeeds config = do
-  urls <- getFeedUrlsFromDB config
-  processFeeds urls config
+updateAllFeeds :: AppM ()
+updateAllFeeds = do
+  urls <- getFeedUrlsFromDB
+  liftIO $ processFeeds urls
 
-destroyDB :: App ()
-destroyDB (Config{..}) =
-  withResource connPool $ \conn -> do
-    _ <- justRunQuery conn $ fromString "DROP TABLE IF EXISTS feed_items;"
-    justRunQuery conn $ fromString "DROP TABLE IF EXISTS feeds;"
-
-removeFeed :: URL -> App ()
-removeFeed url (Config{..}) =
-  withResource connPool $ \conn -> do
+removeFeed' :: URL -> AppM ()
+removeFeed' url = do
+  Config{..} <- ask
+  liftIO $ withResource connPool $ \conn -> do
     _ <- setPragmas conn
     res <- query' conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only url) :: IO [(Int, String)]
     when (null res) $ throw $ DatabaseError "I could not find any such feed in the database. Maybe it's already gone?"
     execute' conn (fromString "DELETE FROM feeds where url = ?;") (Only url)
 
-listFeeds :: App [(Maybe String, String)]
-listFeeds (Config{..}) = do
-  withResource connPool $ \conn -> do
+listFeeds :: AppM [(Maybe String, String)]
+listFeeds = do
+  Config{..} <- ask
+  liftIO $ withResource connPool $ \conn -> do
     query_' conn selectAllFeeds :: IO [(Maybe String, String)]
-
-setPragmas :: Connection -> IO ()
-setPragmas = flip execute_ (fromString "PRAGMA foreign_keys = ON;")
 
 userConfirmation :: String -> IO Bool
 userConfirmation msg = do
@@ -317,10 +264,12 @@ userConfirmation msg = do
   input <- getLine
   pure $ input == "y" || input == "Y"
 
-createDigest :: Day -> App [FeedItemWithMeta]
-createDigest day config = withResource (connPool config) $ \conn -> do
-  xs <- query' conn q (Only day) :: IO [(String, String, String, String, Day)]
-  pure $ map (\(url, feedTitle, link, title, updated) -> FeedItemWithMeta{feedItem = FeedItem{title = title, link = Just link, updated = Just updated}, feedTitle = feedTitle, feedURL = url}) xs
+createDigest :: Day -> AppM [FeedItemWithMeta]
+createDigest day = do
+  Config{..} <- ask
+  liftIO $ withResource connPool $ \conn -> do
+    xs <- query' conn q (Only day) :: IO [(String, String, String, String, Day)]
+    pure $ map (\(url, feedTitle, link, title, updated) -> FeedItemWithMeta{feedItem = FeedItem{title = title, link = Just link, updated = Just updated}, feedTitle = feedTitle, feedURL = url}) xs
  where
   q = fromString "select feeds.url, feeds.title as feed_title, f.link, f.title, f.updated from feed_items f join feeds on f.feed_id = feeds.id where f.updated = ?;"
 
@@ -331,12 +280,13 @@ feedItemsToHtml items = "<ul>" ++ concatMap (\item@FeedItemWithMeta{..} -> "<a c
   feedItemToHtmlLink FeedItemWithMeta{..} =
     "<div class=\"title\">" ++ title feedItem ++ "</div><div class=\"domain\">" ++ getDomain (link feedItem) ++ " &bull; " ++ maybe "" showDay (updated feedItem) ++ "</div>"
 
-writeDigest :: Config -> Day -> [FeedItemWithMeta] -> IO String
-writeDigest (Config{..}) day items = do
+writeDigest :: Day -> [FeedItemWithMeta] -> AppM String
+writeDigest day items = do
+  Config{..} <- ask
   let fileName = show day
       filePath = rdigestPath ++ "/digest-" ++ fileName ++ ".html"
       groupedByURL = groupByURL items
-  failWith DigestError $ writeFile filePath (generateDigestContent $ sort' groupedByURL)
+  liftIO $ failWith DigestError $ writeFile filePath (generateDigestContent template $ sort' groupedByURL)
   pure filePath
  where
   sort' =
@@ -351,8 +301,8 @@ writeDigest (Config{..}) day items = do
        in case lookup key acc of
             Just ys -> go ((key, x : ys) : filter (\(k, _) -> k /= key) acc) xs
             Nothing -> go ((key, [x]) : acc) xs
-  generateDigestContent :: [((URL, String), [FeedItemWithMeta])] -> String
-  generateDigestContent xs =
+  generateDigestContent :: String -> [((URL, String), [FeedItemWithMeta])] -> String
+  generateDigestContent template xs =
     let titleReplaced = replaceDigestTitle ("Digest — " ++ wrapDate (show day) ++ ":") template
         summaryReplaced = replaceDigestSummary ("There are " ++ show (Prelude.length $ concatMap snd xs) ++ " posts.") titleReplaced
         contentReplaced = replaceDigestContent (concatMap convertGroupToHtml xs) summaryReplaced
@@ -408,131 +358,41 @@ extractArgBool key argPairs = lookup key argPairs >>= extractBool
   extractBool (ArgBool bool) = Just bool
   extractBool _ = Nothing
 
-refreshFeed :: URL -> App ()
-refreshFeed url config@Config{..} = do
+refreshFeed :: URL -> AppM ()
+refreshFeed url = do
+  Config{..} <- ask
   let q = fromString "select id, url from feeds where url = ?;"
-  res <- withResource connPool $ \conn -> query' conn q (Only url) :: IO [(Int, String)]
-  case res of
-    [] -> throw $ DatabaseError $ "I could not find " ++ url ++ " in your list of feeds. Try `rdigest list feeds` to see your feeds."
+  res <- liftIO $ withResource connPool $ \conn -> query' conn q (Only url) :: IO [(Int, String)]
+  liftIO $ case res of
+    [] -> throw $ DatabaseError $ "I could not find " ++ url ++ " in your list of feeds. Try `rdigest feeds list` to see your feeds and `rdigest feeds add` to add this feed."
     (feedId, _) : _ -> do
-      processFeeds [(feedId, url)] config
+      processFeeds [(feedId, url)]
 
-runMultipleQueries :: Connection -> MultipleQueries -> IO ()
-runMultipleQueries conn (MultipleQueries queries) = do
-  let qs = filter (not . T.null) $ map T.strip $ T.splitOn (T.pack ";") (T.pack queries)
-  failWith DatabaseError $ withTransaction conn $ forM_ qs $ \q -> execute_ conn (fromString (T.unpack q))
-
-addTitleAndCreatedAtColumns :: MultipleQueries
-addTitleAndCreatedAtColumns = (MultipleQueries . BS.unpack) $(embedFile "./migrations/1.sql")
-
-updateTitleForFeeds :: App ()
-updateTitleForFeeds config@Config{..} = do
-  urls <- getFeedUrlsFromDB config
-  withResource connPool $ \conn -> forM_ urls $ \url -> do
-    _ <- try $ updateFeedTitle conn url :: IO (Either AppError ())
-    pure ()
-
-updateFeedTitle :: Connection -> (Int, URL) -> IO ()
-updateFeedTitle conn (feedId, url) = do
-  let q = fromString "update feeds set title = ? where id = ?;"
-  contents <- fetchUrl url
-  let title = extractTitleFromFeedUrl url contents
-  execute conn q (title, feedId)
-
-checkIfTitleColumnExists :: App Bool
-checkIfTitleColumnExists Config{..} = failWith DatabaseError $ do
-  let q = fromString "select count(*) from pragma_table_info('feeds') where name = 'title';"
-  withResource connPool $ \conn -> do
-    res <- query_ conn q :: IO [Only Int]
-    pure $ case res of
-      [Only x] -> x > 0
-      _ -> False
-
-updateIndexFile :: App ()
-updateIndexFile Config{..} = do
-  files <- getDirectoryContents rdigestPath
-  let htmlFiles = filter (\file -> isSuffixOf ".html" file && file /= "index.html") files
-      sortedHtmlFiles = sortBy (comparing Down) htmlFiles
-  indexFileContents <- generateIndexFileContent sortedHtmlFiles
-  failWith GeneralError $ writeFile (rdigestPath ++ "/index.html") indexFileContents
+updateIndexFile :: AppM ()
+updateIndexFile = do
+  Config{..} <- ask
+  liftIO $ do
+    files <- getDirectoryContents rdigestPath
+    let htmlFiles = filter (\file -> isSuffixOf ".html" file && file /= "index.html") files
+        sortedHtmlFiles = sortBy (comparing Down) htmlFiles
+    indexFileContents <- generateIndexFileContent indexTemplate sortedHtmlFiles
+    failWith GeneralError $ writeFile (rdigestPath ++ "/index.html") indexFileContents
  where
-  generateIndexFileContent :: [FilePath] -> IO String
-  generateIndexFileContent files = do
+  generateIndexFileContent :: String -> [FilePath] -> IO String
+  generateIndexFileContent indexTemplate files = do
     let links = map (\file -> "<li><a href=\"./" ++ file ++ "\">" ++ file ++ "</a></li>") files
         content = "<ul>" ++ concat links ++ "</ul>"
     pure $ replaceContent "{indexContent}" content indexTemplate
 
-createDigestForDateRange :: Day -> Day -> App ()
-createDigestForDateRange start end config = do
-  dates <- getValidDatesBetween start end config
-  forM_ dates $ \date -> do
-    items <- try $ createDigest date config :: IO (Either AppError [FeedItemWithMeta])
-    case items of
-      Left e -> showAppError e
-      Right xs ->
-        if null xs
-          then putStrLn $ "I can't create a digest for " ++ showDay date ++ ". There are no posts to make a digest out of."
-          else do
-            putStrLn $ "I am now preparing digest for " ++ showDay date ++ ". Give me a few seconds..."
-            file <- writeDigest config date xs
-            putStrLn $ "I have saved the digest file at " ++ file ++ "."
-
-updateAllDigests :: App ()
-updateAllDigests config@Config{..} = do
-  let minDateQuery = fromString "select min(distinct(updated)) from feed_items;"
-      maxDateQuery = fromString "select max(distinct(updated)) from feed_items;"
-  withResource connPool $ \conn -> do
-    minDate <- query_' conn minDateQuery :: IO [Only Day]
-    maxDate <- query_' conn maxDateQuery :: IO [Only Day]
-    case (minDate, maxDate) of
-      ([Only minD], [Only maxD]) -> createDigestForDateRange minD maxD config
-      _ -> putStrLn "I couldn't find any posts in the database."
-
-getValidDatesBetween :: Day -> Day -> App [Day]
-getValidDatesBetween start end Config{..} = do
-  let queryToGetDates = fromString "select count(updated), updated from feed_items where updated >= ? and updated <= ? group by updated order by updated desc;"
-  withResource connPool $ \conn -> do
-    days <- query' conn queryToGetDates (start, end) :: IO [(Int, Day)]
-    pure $ map snd days
-
-initializeTables :: Connection -> IO ()
-initializeTables conn = do
-  _ <- justRunQuery conn createFeedsTable
-  justRunQuery conn createFeedItemsTable
-
-initDB :: App ()
-initDB config@(Config{..}) = do
-  withResource
-    connPool
-    ( \conn -> do
-        _ <- setPragmas conn
-        initializeTables conn
-    )
-  titleExists <- checkIfTitleColumnExists config
-  if titleExists
-    then pure ()
-    else do
-      putStrLn "Updating the database..."
-      withResource connPool $ \conn -> runMultipleQueries conn addTitleAndCreatedAtColumns
-      updateTitleForFeeds config
-
-runApp :: App a -> IO ()
-runApp app = do
-  let template = $(embedFile "./template.html")
-      indexTemplate = $(embedFile "./index-template.html")
-  rdigestPath <- lookupEnv "RDIGEST_FOLDER"
-  channelId <- lookupEnv "TG_CHANNEL_ID"
-  chatId <- lookupEnv "TG_CHAT_ID" -- backwards compatibility
-  chanId <- lookupEnv "TG_CHAN_ID" -- backwards compatibility
-  let _channelId = channelId <|> chatId <|> chanId
-  case rdigestPath of
-    Nothing -> showAppError $ GeneralError "It looks like you have not set the RDIGEST_FOLDER env. `export RDIGEST_FOLDER=<full-path-where-rdigest-should-save-data>"
-    Just rdPath -> do
-      pool <- newPool (defaultPoolConfig (open (getDBFile rdPath)) close 60.0 10)
-      let config = Config{connPool = pool, template = BS.unpack template, rdigestPath = rdPath, indexTemplate = BS.unpack indexTemplate}
-      res <- (try :: IO a -> IO (Either AppError a)) $ app config
-      destroyAllResources pool
-      either showAppError (const $ return ()) res
+initDB :: AppM ()
+initDB = do
+  (Config{..}) <- ask
+  liftIO $
+    withResource
+      connPool
+      ( \conn -> do
+          applyMigrations conn
+      )
 
 runAppM :: AppM a -> IO ()
 runAppM app = do
@@ -660,13 +520,55 @@ getYtRssFeeds :: [String] -> IO [String]
 getYtRssFeeds urls = do
   mapM getFeedUrlFromWebsite urls >>= pure . catMaybes
 
-makeRssFeedsList :: IO ()
-makeRssFeedsList = do
-  urls <- readFile "ytfeeds.list" >>= pure . lines
-  runApp $ \config ->
-    mapM_
-      ( \url -> do
-          putStrLn $ "Inserting feed: " <> url
-          insertFeed' url config
-      )
-      urls
+-- MIGRATION LOGIC
+
+migrations :: [(FilePath, BS.ByteString)]
+migrations = $(embedDir "migrations")
+
+getAppliedMigrationsFromTable :: Connection -> IO [FilePath]
+getAppliedMigrationsFromTable conn = do
+  applied <- try' $ query_' conn (fromString "select id from migrations;")
+  case applied of
+    Left _ -> pure []
+    Right [] -> pure []
+    Right a -> pure $ map fromOnly a
+
+applyMigrations :: Connection -> IO ()
+applyMigrations conn = do
+  let migrationFiles = migrations
+  applied <- getAppliedMigrationsFromTable conn
+  let toApply = filter (\(file, _) -> file `notElem` applied) migrationFiles
+  forM_
+    toApply
+    ( \(f, sql) -> do
+        withTransaction conn $ do
+          dontApplyMigration002 <- feedTableHasTitleAlready conn -- this is just in case someone has already got the updated rdigest.
+          if f == "002_update_columns.sql" && dontApplyMigration002
+            then execute' conn (fromString "insert into migrations (id) values (?)") $ Only f
+            else do
+              let queriesToRun = filter (not . null . trim) $ map toString $ BS.split ';' sql
+              forM_
+                queriesToRun
+                ( \q -> do
+                    execute_' conn (fromString q)
+                )
+              execute' conn (fromString "insert into migrations (id) values (?)") $ Only f
+    )
+
+feedTableHasTitleAlready :: Connection -> IO Bool
+feedTableHasTitleAlready conn = do
+  res <- query_' conn (fromString "select count(*) from pragma_table_info('feeds') where name = 'title'") :: IO [Only Int]
+  case res of
+    [] -> pure False
+    (h : _) -> pure $ h > Only 0
+
+-- TEST
+
+test1 = do
+  pool <- newPool (defaultPoolConfig (open (getDBFile "/Users/chandrashekharv/Documents/projects/rdigest")) close 60.0 10)
+  withResource pool $ \conn -> do
+    applyMigrations conn
+
+test2 url = do
+  r <- getYtRssFeeds [url]
+  print r

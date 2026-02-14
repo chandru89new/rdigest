@@ -25,18 +25,14 @@ type URL = String
 data Command
   = Init
   | AddFeed URL
-  | RefreshFeed URL
-  | RefreshFeeds
   | ListFeeds
   | RemoveFeed URL
-  | UpdateAllDigests
-  | PurgeEverything
-  | CreateDayDigest [ArgPair]
-  | CreateRangeDigest [ArgPair]
   | ShowVersion
   | ShowHelp
   | StartServer (Maybe Int)
   | InvalidCommand
+  | CreateDigest
+  | ExportDigest
   deriving (Eq)
 
 data AppError
@@ -60,8 +56,6 @@ newtype FeedId = FeedId Int deriving (Show)
 
 instance FromJSON FeedId where
   parseJSON = withObject "FeedId" $ \v -> FeedId <$> v .: "id"
-
-type App a = Config -> IO a
 
 type AppM a = ReaderT Config IO a
 

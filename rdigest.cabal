@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               rdigest
-version:            0.3.4
+version:            0.4.0
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -19,7 +19,7 @@ maintainer:         chandru89new@gmail.com
 -- A copyright notice.
 -- copyright:
 -- category:
-extra-doc-files: CHANGELOG.md, index-template.html, template.html, migrations/1.sql
+extra-doc-files: CHANGELOG.md, index-template.html, template.html, migrations/1.sql, migrations/2.sql
 
 common warnings
     ghc-options: -Wall

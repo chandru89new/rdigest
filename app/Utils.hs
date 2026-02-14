@@ -15,6 +15,7 @@ module Utils where
 import Control.Exception
 import qualified Data.ByteString.Char8 as BS
 import Data.CaseInsensitive
+import Data.Pool (withResource)
 import Data.Text
 import Data.Text.Encoding
 import Database.SQLite.Simple
