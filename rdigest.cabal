@@ -19,7 +19,7 @@ maintainer:         chandru89new@gmail.com
 -- A copyright notice.
 -- copyright:
 -- category:
-extra-doc-files: CHANGELOG.md, index-template.html, template.html, migrations/1.sql, migrations/2.sql
+extra-doc-files: CHANGELOG.md, index-template.html, template.html, migrations/*.sql
 
 common warnings
     ghc-options: -Wall
@@ -30,7 +30,7 @@ executable rdigest
     import:           warnings
     main-is:          Main.hs
 
-    other-modules:     Paths_rdigest, Server, Types, Utils, DB
+    other-modules:     Paths_rdigest, Server, Types, Utils, DB, CLI
     -- other-extensions:
     build-depends:      base,
                         tagsoup,
@@ -47,7 +47,8 @@ executable rdigest
                         directory,
                         aeson,
                         scotty,
-                        http-types
+                        http-types,
+                        containers
     hs-source-dirs:   app
     default-language: Haskell2010
     ghc-options: -Wall -Wincomplete-patterns -threaded

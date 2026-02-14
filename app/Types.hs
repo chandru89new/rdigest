@@ -30,9 +30,9 @@ data Command
   | ShowVersion
   | ShowHelp
   | StartServer (Maybe Int)
+  | UpdateFeeds
+  | ShowDigest (Maybe Int)
   | InvalidCommand
-  | CreateDigest
-  | ExportDigest
   deriving (Eq)
 
 data AppError
@@ -87,7 +87,7 @@ instance ToJSON TgMsg where
       , "link_preview_options" .= object ["url" .= link_url (link_preview_options tgMsg)]
       ]
 
-data Resource = Health | Echo | Feeds | Links | InvalidResource deriving (Show)
+data Resource = Health | Echo | Feeds | Links | Digests | InvalidResource deriving (Show)
 
 data Action = Test | Add | List | Get | Remove | InvalidAction deriving (Show)
 
@@ -116,6 +116,7 @@ instance FromJSON Resource where
     "echo" -> pure Echo
     "feeds" -> pure Feeds
     "links" -> pure Links
+    "digests" -> pure Digests
     _ -> pure InvalidResource
 
 instance FromJSON Action where
@@ -191,3 +192,30 @@ instance ToJSON ApiErrorObject where
       [ "type" .= errorType
       , "message" .= errorMsg
       ]
+
+data Digest = Digest
+  { digestDate :: Day
+  , digestLinks :: [DigestLinks]
+  }
+  deriving (Show)
+
+data DigestLinks = DigestLinks
+  { dlink :: String
+  , dtitle :: Maybe String
+  }
+  deriving (Show)
+
+instance ToJSON DigestLinks where
+  toJSON DigestLinks{..} = object ["link" .= dlink, "title" .= dtitle]
+
+instance ToJSON Digest where
+  toJSON Digest{..} = object ["date" .= digestDate, "links" .= map toJSON digestLinks]
+
+showAppError :: AppError -> IO ()
+showAppError (FetchError msg) = putStrLn $ "Error fetching URL: " ++ msg
+showAppError (DatabaseError msg) = putStrLn $ "Database error: " ++ msg
+showAppError (FeedParseError msg) = putStrLn $ "Error parsing feed: " ++ msg
+showAppError (ArgError msg) = putStrLn $ "Argument error: " ++ msg
+showAppError (DigestError msg) = putStrLn $ "Digest error: " ++ msg
+showAppError (NotifyError msg) = putStrLn $ "Notification error: " ++ msg
+showAppError (GeneralError msg) = putStrLn $ "Error: " ++ msg

@@ -7,5 +7,8 @@ debug-build:
 clean-build:
 	cabal clean && make build
 
+start:
+	./release/rdigest start
+
 bstart:
-	make build && ./release/rdigest start
+	make build && make start
