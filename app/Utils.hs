@@ -20,7 +20,7 @@ import qualified Data.ByteString.Char8 as BS
 import Data.CaseInsensitive
 import Data.FileEmbed
 import Data.Maybe
-import Data.Pool (defaultPoolConfig, destroyAllResources, newPool, withResource)
+import Data.Pool (defaultPoolConfig, destroyAllResources, newPool)
 import Data.Text
 import Data.Text.Encoding
 import Data.Time
@@ -192,10 +192,12 @@ parseURL url = case parseURI url of
   Nothing -> Nothing
 
 extractRssLinkTag :: [Tag String] -> [Tag String]
-extractRssLinkTag = Prelude.filter isRssLink
+extractRssLinkTag = Prelude.filter (\t -> isRssLink t || isAtomLink t)
  where
   isRssLink (TagOpen "link" attrs) = fromAttrib "type" (TagOpen "link" attrs) == "application/rss+xml"
   isRssLink _ = False
+  isAtomLink (TagOpen "link" attrs) = fromAttrib "type" (TagOpen "link" attrs) == "application/atom+xml"
+  isAtomLink _ = False
 
 getFeedUrlFromWebsite :: String -> IO (Maybe String)
 getFeedUrlFromWebsite url = do
@@ -209,3 +211,16 @@ getFeedUrlFromWebsite url = do
 getYtRssFeeds :: [String] -> IO [String]
 getYtRssFeeds urls = do
   mapM getFeedUrlFromWebsite urls >>= pure . catMaybes
+
+-- findValidFeedUrl :: String -> IO (Maybe String)
+-- findValidFeedUrl url = do
+--   let url' = dropTrailingSlash url
+--   let b = url' <> "/feed.xml"
+--   let c = url' <> "/atom.xml"
+--   let d = url' <> "/feed"
+--   let e = url' <> "/rss"
+--   a <- getFeedUrlFromWebsite url'
+--   pure Nothing
+
+-- dropTrailingSlash :: String -> String
+-- dropTrailingSlash str = if (Prelude.null str && (Prelude.last str == '/')) then Prelude.init str else str

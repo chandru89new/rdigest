@@ -19,10 +19,10 @@ import qualified Data.ByteString.Char8 as BS
 import Data.FileEmbed
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
-import Data.Pool (defaultPoolConfig, newPool, withResource)
+import Data.Pool (withResource)
 import Data.String (IsString (fromString))
 import Data.Version (showVersion)
-import Database.SQLite.Simple (Connection, Only (Only, fromOnly), close, open, withTransaction)
+import Database.SQLite.Simple (Connection, Only (Only, fromOnly), withTransaction)
 import Paths_rdigest (version)
 import Server (startServer)
 import System.Environment (getArgs)
@@ -191,22 +191,22 @@ feedTableHasTitleAlready conn = do
 
 -- TEST
 
-test1 = do
-  pool <- newPool (defaultPoolConfig (open (getDBFile "/Users/chandrashekharv/Documents/projects/rdigest")) close 60.0 10)
-  withResource pool $ \conn -> do
-    applyMigrations conn
+-- test1 = do
+--   pool <- newPool (defaultPoolConfig (open (getDBFile "/Users/chandrashekharv/Documents/projects/rdigest")) close 60.0 10)
+--   withResource pool $ \conn -> do
+--     applyMigrations conn
 
-test2 url = do
-  r <- getYtRssFeeds [url]
-  print r
+-- test2 url = do
+--   r <- getYtRssFeeds [url]
+--   print r
 
-test3 = do
-  runAppM $ do
-    Config{..} <- ask
-    liftIO $
-      withResource
-        connPool
-        ( \conn -> do
-            res <- getDigests conn (PageParams (Just 2) (Just 0))
-            print res
-        )
+-- test3 = do
+--   runAppM $ do
+--     Config{..} <- ask
+--     liftIO $
+--       withResource
+--         connPool
+--         ( \conn -> do
+--             res <- getDigests conn (PageParams (Just 2) (Just 0))
+--             print res
+--         )

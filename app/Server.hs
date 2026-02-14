@@ -140,6 +140,6 @@ extractPageParams reqData = do
 
 -- TEST
 
-test start limit = do
-  pool <- newPool (defaultPoolConfig (open (getDBFile "/Users/chandrashekharv/Documents/rdigest-data")) close 60.0 10)
-  withResource pool (flip getFeedsListWithParams (PageParams start limit))
+-- test start limit = do
+--   pool <- newPool (defaultPoolConfig (open (getDBFile "/Users/chandrashekharv/Documents/rdigest-data")) close 60.0 10)
+--   withResource pool (flip getFeedsListWithParams (PageParams start limit))
