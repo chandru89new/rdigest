@@ -106,7 +106,7 @@ progHelp =
   \  feeds list            - List all feeds.\n\
   \  feeds update          - Update/refresh all feeds.\n\
   \  digest [offset]       - Show a digest by offset (1 = latest, 2 = previous, etc.). Optional. If no offset given, 1 is assumed.\n\
-  \  start [port]          - Start the API server on the given port or on 5500.\n"
+  \  start [port]          - Start the API server on the given port (optional) or on 5500 if no port given.\n"
 
 getCommand :: IO Command
 getCommand = do
