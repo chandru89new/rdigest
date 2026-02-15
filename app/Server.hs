@@ -2,6 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Use section" #-}
@@ -16,15 +17,31 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
 import DB
 import Data.Aeson
+import Data.ByteString hiding (isSuffixOf, pack)
+import qualified Data.ByteString.Char8 as BS
+import Data.FileEmbed
 import Data.Pool
 import Data.Text
+import Data.Text.Lazy hiding (Text, isSuffixOf, pack)
 import Database.SQLite.Simple
 import Network.HTTP.Types.Status
 import Types
 import Utils
-import Web.Scotty (ActionM, finish, json, jsonData, post, scotty, status)
+import Web.Scotty (ActionM, captureParam, finish, get, json, jsonData, post, raw, regex, scotty, setHeader, status)
 
--- TYPES
+uiFiles :: [(FilePath, BS.ByteString)]
+uiFiles = $(embedDir "ui/public")
+
+indexFile = lookup "index.html" uiFiles
+
+getContentType :: FilePath -> Text
+getContentType f
+  | ".html" `isSuffixOf` pack f = "text/html"
+  | pack ".js" `isSuffixOf` pack f = pack "application/javascript"
+  | pack ".css" `isSuffixOf` pack f = pack "text/css"
+  | pack ".png" `isSuffixOf` pack f = pack "image/png"
+  | pack ".svg" `isSuffixOf` pack f = pack "image/svg+xml"
+  | otherwise = "application/octet-stream"
 
 -- MAIN
 
@@ -37,6 +54,19 @@ startServer port = do
     liftIO $ do
       pool <- newPool (defaultPoolConfig (open (getDBFile rdigestPath)) close 60.0 10)
       scotty port $ do
+        get "/" $ do
+          case indexFile of
+            Nothing -> status status404
+            Just c -> do
+              setHeader "Content-Type" ("text/html")
+              raw (Data.ByteString.fromStrict c)
+        get (regex "^/(.+)$") $ do
+          path <- captureParam "1"
+          case lookup path uiFiles of
+            Nothing -> status status404
+            Just c -> do
+              setHeader "Content-Type" (Data.Text.Lazy.fromStrict $ getContentType path)
+              raw (Data.ByteString.fromStrict c)
         post "/api/v1" $ do
           r@RpcRequest{..} <- jsonData :: ActionM RpcRequest
           case (reqResource, reqAction) of

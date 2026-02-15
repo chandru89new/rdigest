@@ -19,7 +19,12 @@ maintainer:         chandru89new@gmail.com
 -- A copyright notice.
 -- copyright:
 -- category:
-extra-doc-files: CHANGELOG.md, index-template.html, template.html, migrations/*.sql
+extra-doc-files:    CHANGELOG.md,
+                    index-template.html,
+                    template.html,
+                    migrations/*.sql,
+                    ui/public/index.html,
+                    ui/public/*.js
 
 common warnings
     ghc-options: -Wall
