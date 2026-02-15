@@ -43,6 +43,14 @@ getContentType f
   | pack ".svg" `isSuffixOf` pack f = pack "image/svg+xml"
   | otherwise = "application/octet-stream"
 
+serveIndex :: ActionM ()
+serveIndex = do
+  case indexFile of
+    Nothing -> status status404
+    Just c -> do
+      setHeader "Content-Type" ("text/html")
+      raw (Data.ByteString.fromStrict c)
+
 -- MAIN
 
 startServer :: Int -> IO ()
@@ -54,16 +62,11 @@ startServer port = do
     liftIO $ do
       pool <- newPool (defaultPoolConfig (open (getDBFile rdigestPath)) close 60.0 10)
       scotty port $ do
-        get "/" $ do
-          case indexFile of
-            Nothing -> status status404
-            Just c -> do
-              setHeader "Content-Type" ("text/html")
-              raw (Data.ByteString.fromStrict c)
+        get "/" serveIndex
         get (regex "^/(.+)$") $ do
           path <- captureParam "1"
           case lookup path uiFiles of
-            Nothing -> status status404
+            Nothing -> serveIndex
             Just c -> do
               setHeader "Content-Type" (Data.Text.Lazy.fromStrict $ getContentType path)
               raw (Data.ByteString.fromStrict c)

@@ -24,7 +24,8 @@ extra-doc-files:    CHANGELOG.md,
                     template.html,
                     migrations/*.sql,
                     ui/public/index.html,
-                    ui/public/*.js
+                    ui/public/*.js,
+                    ui/public/*.css
 
 common warnings
     ghc-options: -Wall
