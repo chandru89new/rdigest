@@ -2,3 +2,4 @@ dist-newstyle/
 rdigest.db
 digest-*.html
 release/
+rdtest
