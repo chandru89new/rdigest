@@ -13,6 +13,7 @@
 
 module Server where
 
+import Control.Exception (try)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
 import DB
@@ -20,6 +21,7 @@ import Data.Aeson
 import Data.ByteString hiding (isSuffixOf, pack)
 import qualified Data.ByteString.Char8 as BS
 import Data.FileEmbed
+import Data.Maybe
 import Data.Pool
 import Data.Text
 import Data.Text.Lazy hiding (Text, isSuffixOf, pack)
@@ -121,6 +123,15 @@ startServer port = do
                 (errWithStatus status400)
                 (json . toJSON)
                 $ withResource pool (flip getDigests pageParams)
+            (Digests, Get) -> do
+              date <- if (isJust reqData) then parseRequest reqData else pure Nothing :: ActionM (Maybe String)
+              runApiFn
+                (errWithStatus status400)
+                ( \v -> case v of
+                    Nothing -> errWithStatus status404 (DatabaseError "No digest found.")
+                    Just v' -> json $ toJSON v'
+                )
+                $ withResource pool (flip getDigestForDate date)
             (Echo, _) -> json $ object ["request" .= show r]
             _ -> do
               status status400
@@ -168,7 +179,7 @@ errWithStatus s e = do
 extractPageParams :: Maybe Value -> ActionM PageParams
 extractPageParams reqData = do
   case reqData of
-    Nothing -> pure $ PageParams (Just 10) (Just 0) :: ActionM PageParams
+    Nothing -> pure $ PageParams 10 0 :: ActionM PageParams
     Just value -> parseRequest (Just value) :: ActionM PageParams
 
 -- TEST

@@ -83,12 +83,12 @@ main' command =
           withResource
             connPool
             ( \conn -> do
-                r <- getDigests conn (PageParams (Just 1) (Just offset))
+                r <- getDigestsFull conn (PageParams 1 offset)
                 case r of
                   [] -> putStrLn "No digests found."
                   (Digest{..} : _) -> do
                     putStrLn $ "## Digest for date: " <> show digestDate
-                    mapM_ (\DigestLinks{..} -> putStrLn ("[" <> fromMaybe dlink dtitle <> "](" <> dlink <> ")")) digestLinks
+                    mapM_ (\DigestLink{..} -> putStrLn ("[" <> fromMaybe dlink dtitle <> "](" <> dlink <> ")")) digestLinks
             )
     InvalidCommand -> do
       putStrLn "I could not recognize that command. Try `rdigest help`."

@@ -16,6 +16,7 @@ module Types where
 import Control.Exception
 import Control.Monad.Trans.Reader
 import Data.Aeson
+import Data.Maybe
 import Data.Pool
 import Data.Time
 import Database.SQLite.Simple
@@ -158,16 +159,21 @@ instance ToJSON ListFeedsResponse where
       ]
 
 data PageParams = PageParams
-  { pageLimit :: Maybe Int
-  , pageOffset :: Maybe Int
+  { pageLimit :: Int
+  , pageOffset :: Int
   }
+  deriving (Show)
 
 instance FromJSON PageParams where
   parseJSON = withObject "PageParams" $ \v ->
-    PageParams <$> v .:? "limit" <*> v .:? "offset"
+    PageParams <$> (v .:? "limit" .!= defaultPageLimit) <*> (v .:? "offset" .!= defaultOffset)
 
 instance ToJSON PageParams where
-  toJSON PageParams{..} = object ["limit" .= pageLimit, "offset" .= pageOffset]
+  toJSON PageParams{..} =
+    object
+      [ "limit" .= pageLimit
+      , "offset" .= pageOffset
+      ]
 
 data FeedLinksResponse = FeedLinksResponse
   { fiLink :: String
@@ -195,18 +201,21 @@ instance ToJSON ApiErrorObject where
 
 data Digest = Digest
   { digestDate :: Day
-  , digestLinks :: [DigestLinks]
+  , digestLinks :: [DigestLink]
   }
   deriving (Show)
 
-data DigestLinks = DigestLinks
+data DigestLink = DigestLink
   { dlink :: String
   , dtitle :: Maybe String
+  , dfeedId :: Int
+  , dfeedTitle :: Maybe String
+  , dfeedUrl :: String
   }
   deriving (Show)
 
-instance ToJSON DigestLinks where
-  toJSON DigestLinks{..} = object ["link" .= dlink, "title" .= dtitle]
+instance ToJSON DigestLink where
+  toJSON DigestLink{..} = object ["link" .= dlink, "title" .= dtitle, "feed_id" .= dfeedId, "feed_title" .= dfeedTitle, "feed_url" .= dfeedUrl]
 
 instance ToJSON Digest where
   toJSON Digest{..} = object ["date" .= digestDate, "links" .= map toJSON digestLinks]
@@ -219,3 +228,9 @@ showAppError (ArgError msg) = putStrLn $ "Argument error: " ++ msg
 showAppError (DigestError msg) = putStrLn $ "Digest error: " ++ msg
 showAppError (NotifyError msg) = putStrLn $ "Notification error: " ++ msg
 showAppError (GeneralError msg) = putStrLn $ "Error: " ++ msg
+
+defaultPageLimit :: Int
+defaultPageLimit = 10
+
+defaultOffset :: Int
+defaultOffset = 0

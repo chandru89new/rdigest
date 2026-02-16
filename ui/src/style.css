@@ -3,3 +3,7 @@
 body {
   @apply p-3;
 }
+
+a {
+  @apply text-blue-600;
+}
