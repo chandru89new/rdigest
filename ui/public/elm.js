@@ -7809,7 +7809,30 @@ var $author$project$Main$viewDigestsList = function (model) {
 					]),
 				_List_fromArray(
 					[
-						$elm$html$Html$text('No digests yet. Try refreshing the feeds?')
+						$elm$html$Html$text('No digests yet. Ensure you have '),
+						A2(
+						$elm$html$Html$a,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$href('/feeds'),
+								$elm$html$Html$Attributes$class('opacity-100')
+							]),
+						_List_fromArray(
+							[
+								$elm$html$Html$text('feeds')
+							])),
+						$elm$html$Html$text(' and then try '),
+						A2(
+						$elm$html$Html$span,
+						_List_fromArray(
+							[
+								$elm$html$Html$Events$onClick($author$project$Main$RefreshFeed),
+								$elm$html$Html$Attributes$class('opacity-100 cursor-pointer')
+							]),
+						_List_fromArray(
+							[
+								$elm$html$Html$text('refreshing the feeds?')
+							]))
 					]));
 	}
 };
@@ -7967,8 +7990,17 @@ var $author$project$Main$viewFeedsList = function (model) {
 															A2(
 																$author$project$Main$ShowPrompt,
 																'Change title to:',
-																$elm$json$Json$Encode$string(
-																	A2($elm$core$Maybe$withDefault, f.url, f.title))))
+																$elm$json$Json$Encode$object(
+																	_List_fromArray(
+																		[
+																			_Utils_Tuple2(
+																			'key',
+																			$elm$json$Json$Encode$string('editTitle')),
+																			_Utils_Tuple2(
+																			'defaultValue',
+																			$elm$json$Json$Encode$string(
+																				A2($elm$core$Maybe$withDefault, f.url, f.title)))
+																		]))))
 														]),
 													_List_fromArray(
 														[
@@ -8021,7 +8053,45 @@ var $author$project$Main$viewFeedsList = function (model) {
 							]),
 						_List_fromArray(
 							[
-								$elm$html$Html$text('You don\'t have any feeds. Try adding a feed or importing from an OPML file?')
+								A2(
+								$elm$html$Html$div,
+								_List_Nil,
+								_List_fromArray(
+									[
+										$elm$html$Html$text('You don\'t have any feeds. Try adding a feed or importing from an OPML file?')
+									])),
+								A2(
+								$elm$html$Html$div,
+								_List_Nil,
+								_List_fromArray(
+									[
+										$elm$html$Html$text('Or you can '),
+										A2(
+										$elm$html$Html$span,
+										_List_fromArray(
+											[
+												$elm$html$Html$Attributes$class('cursor-pointer text-blue-600 opacity-100'),
+												$elm$html$Html$Events$onClick(
+												A2(
+													$author$project$Main$ShowPrompt,
+													'Enter feed URL:',
+													$elm$json$Json$Encode$object(
+														_List_fromArray(
+															[
+																_Utils_Tuple2(
+																'key',
+																$elm$json$Json$Encode$string('addFeed')),
+																_Utils_Tuple2(
+																'defaultValue',
+																$elm$json$Json$Encode$string('https://notes.druchan.com/feed.xml'))
+															]))))
+											]),
+										_List_fromArray(
+											[
+												$elm$html$Html$text('click here')
+											])),
+										$elm$html$Html$text(' to add a sample feed real quick.')
+									]))
 							])),
 						A2(
 						$elm$html$Html$span,
@@ -8489,7 +8559,13 @@ var $author$project$Main$view = function (model) {
 										$elm$html$Html$text('Refresh feeds')
 									]))
 							])),
-						A2($elm$html$Html$hr, _List_Nil, _List_Nil),
+						A2(
+						$elm$html$Html$hr,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$class('border-0 h-[1px] bg-slate-400')
+							]),
+						_List_Nil),
 						A2(
 						$elm$html$Html$div,
 						_List_Nil,

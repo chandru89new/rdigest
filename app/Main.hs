@@ -42,13 +42,12 @@ main = do
 main' :: Command -> IO ()
 main' command =
   case command of
-    Init -> do
-      runAppM $ do
-        liftIO $ do
-          putStrLn "Initializing rdigest..."
-          putStrLn "If you ran this already, do not worry: all your current `rdigest` data is safe."
-        initDB
-        liftIO $ putStrLn "Done."
+    Init -> runAppM $ do
+      liftIO $ do
+        putStrLn "Initializing rdigest..."
+        putStrLn "If you ran this already, do not worry: all your current `rdigest` data is safe."
+      initDB
+      liftIO $ putStrLn "Done."
     AddFeed link -> do
       let url = parseURL link
       case url of
@@ -72,7 +71,8 @@ main' command =
     ShowVersion -> putStrLn ("rdigest v" ++ showVersion version)
     ShowHelp -> putStrLn progHelp
     UpdateFeeds -> runAppM updateAllFeedsM
-    StartServer port -> startServer (fromMaybe 5500 port)
+    StartServer port -> do
+      startServer (fromMaybe 5500 port)
     ShowDigest n -> do
       let offset = case n of
             Nothing -> 0
@@ -136,58 +136,6 @@ userConfirmation msg = do
   hFlush stdout
   input <- getLine
   pure $ input == "y" || input == "Y"
-
-initDB :: AppM ()
-initDB = do
-  (Config{..}) <- ask
-  liftIO $
-    withResource
-      connPool
-      ( \conn -> do
-          applyMigrations conn
-      )
-
--- MIGRATION LOGIC
-
-migrations :: [(FilePath, BS.ByteString)]
-migrations = $(embedDir "migrations")
-
-getAppliedMigrationsFromTable :: Connection -> IO [FilePath]
-getAppliedMigrationsFromTable conn = do
-  applied <- try' $ query_' conn (fromString "select id from migrations;")
-  case applied of
-    Left _ -> pure []
-    Right [] -> pure []
-    Right a -> pure $ map fromOnly a
-
-applyMigrations :: Connection -> IO ()
-applyMigrations conn = do
-  let migrationFiles = migrations
-  applied <- getAppliedMigrationsFromTable conn
-  let toApply = filter (\(file, _) -> file `notElem` applied) migrationFiles
-  forM_
-    toApply
-    ( \(f, sql) -> do
-        withTransaction conn $ do
-          dontApplyMigration002 <- feedTableHasTitleAlready conn -- this is just in case someone has already got the updated rdigest.
-          if f == "002_update_columns.sql" && dontApplyMigration002
-            then execute' conn (fromString "insert into migrations (id) values (?)") $ Only f
-            else do
-              let queriesToRun = filter (not . null . trim) $ map toString $ BS.split ';' sql
-              forM_
-                queriesToRun
-                ( \q -> do
-                    execute_' conn (fromString q)
-                )
-              execute' conn (fromString "insert into migrations (id) values (?)") $ Only f
-    )
-
-feedTableHasTitleAlready :: Connection -> IO Bool
-feedTableHasTitleAlready conn = do
-  res <- query_' conn (fromString "select count(*) from pragma_table_info('feeds') where name = 'title'") :: IO [Only Int]
-  case res of
-    [] -> pure False
-    (h : _) -> pure $ h > Only 0
 
 -- TEST
 

@@ -13,7 +13,7 @@
   <script>
     const app = Elm.Main.init();
     app.ports.showPrompt.subscribe(([str, opts]) => {
-      const v = prompt(str, opts.defaulValue);
+      const v = prompt(str, opts?.defaultValue);
       if (!!v && !!v.trim()) { app.ports.getPromptResponse.send([opts.key, v]); }
 
     })

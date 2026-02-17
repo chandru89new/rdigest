@@ -402,7 +402,12 @@ viewDigestsList model =
                     )
 
             else
-                div [ class "opacity-60" ] [ text "No digests yet. Try refreshing the feeds?" ]
+                div [ class "opacity-60" ]
+                    [ text "No digests yet. Ensure you have "
+                    , a [ href "/feeds", class "opacity-100" ] [ text "feeds" ]
+                    , text " and then try "
+                    , span [ onClick <| RefreshFeed, class "opacity-100 cursor-pointer" ] [ text "refreshing the feeds?" ]
+                    ]
 
 
 viewDigest : Digest -> Html Msg
@@ -469,7 +474,18 @@ viewFeedsList model =
                             div [ class "border rounded-lg border-slate-200 p-3 flex gap-x-4 items-center items-start justify-between" ]
                                 [ span [ class "font-semibold" ] [ text (Maybe.withDefault f.url f.title) ]
                                 , span [ class "flex items-center gap-x-2" ]
-                                    [ span [ class "hidden cursor-pointer text-xs text-blue-600", onClick (ShowPrompt "Change title to:" (Maybe.withDefault f.url f.title |> Encode.string)) ] [ text "Edit name" ]
+                                    [ span
+                                        [ class "hidden cursor-pointer text-xs text-blue-600"
+                                        , onClick
+                                            (ShowPrompt "Change title to:"
+                                                (Encode.object
+                                                    [ ( "key", Encode.string "editTitle" )
+                                                    , ( "defaultValue", Maybe.withDefault f.url f.title |> Encode.string )
+                                                    ]
+                                                )
+                                            )
+                                        ]
+                                        [ text "Edit name" ]
                                     , span [ class "hidden" ] [ text "•" ]
                                     , span [ class "cursor-pointer text-xs text-red-500", onClick <| ShowConfirm "Sure? This will delete the feed and the links from it. You can't undo it." (Encode.object [ ( "key", Encode.string "deleteFeed" ), ( "value", Encode.string f.url ) ]) ] [ text "Delete" ]
                                     ]
@@ -485,7 +501,23 @@ viewFeedsList model =
                             "hidden"
                         )
                     ]
-                    [ text "You don't have any feeds. Try adding a feed or importing from an OPML file?" ]
+                    [ div [] [ text "You don't have any feeds. Try adding a feed or importing from an OPML file?" ]
+                    , div []
+                        [ text "Or you can "
+                        , span
+                            [ class "cursor-pointer text-blue-600 opacity-100"
+                            , onClick <|
+                                ShowPrompt "Enter feed URL:"
+                                    (Encode.object
+                                        [ ( "key", Encode.string "addFeed" )
+                                        , ( "defaultValue", Encode.string "https://notes.druchan.com/feed.xml" )
+                                        ]
+                                    )
+                            ]
+                            [ text "click here" ]
+                        , text " to add a sample feed real quick."
+                        ]
+                    ]
                 , span
                     [ class <|
                         String.join " "
@@ -528,7 +560,7 @@ view model =
                 , span [] [ text <| "•" ]
                 , span [ onClick RefreshFeed, class "text-green-500 cursor-pointer" ] [ text "Refresh feeds" ]
                 ]
-            , hr [] []
+            , hr [ class "border-0 h-[1px] bg-slate-400" ] []
             , div []
                 [ case model.currPage of
                     DashboardPage ->

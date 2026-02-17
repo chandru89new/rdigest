@@ -63,8 +63,8 @@ startServer :: Int -> IO ()
 startServer port = do
   putStrLn $ "Server started at: " <> show port
   runAppM $ do
+    initDB
     Config{..} <- ask
-    -- rdPath <- (lookupEnv "RDIGEST_PATH") >>= pure . fromMaybe ""
     liftIO $ do
       pool <- newPool (defaultPoolConfig (open (getDBFile rdigestPath)) close 60.0 10)
       scotty port $ do
