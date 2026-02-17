@@ -20,6 +20,7 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
 import DB
 import Data.Aeson
+import Data.Aeson.Encoding (list)
 import Data.Aeson.Types (parseField, parseFieldMaybe, parseMaybe)
 import Data.ByteString hiding (isSuffixOf, pack)
 import qualified Data.ByteString.Char8 as BS
@@ -109,7 +110,7 @@ startServer port = do
                   runApiFn
                     (errWithStatus status400)
                     (\(fid, furl) -> json $ object ["id" .= fid, "url" .= furl])
-                    $ withResource pool (insertFeed h)
+                    $ withResource pool (flip insertFeed h)
                 _ -> do
                   status status400
                   json $ object ["error" .= appErrToObj (GeneralError "Need at least one url in the `urls`.")]

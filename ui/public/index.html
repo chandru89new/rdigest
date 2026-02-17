@@ -14,7 +14,8 @@
     const app = Elm.Main.init();
     app.ports.showPrompt.subscribe(([str, opts]) => {
       const v = prompt(str, opts.defaulValue);
-      app.ports.getPromptResponse.send([opts.key, v]);
+      if (!!v && !!v.trim()) { app.ports.getPromptResponse.send([opts.key, v]); }
+
     })
     app.ports.showConfirm.subscribe(([str, opts]) => {
       const v = confirm(str);

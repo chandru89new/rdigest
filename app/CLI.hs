@@ -20,7 +20,7 @@ insertFeed' :: URL -> AppM [(Int, URL)]
 insertFeed' feedUrl = do
   Config{..} <- ask
   liftIO $ withResource connPool $ \conn -> do
-    res <- insertFeed feedUrl conn
+    res <- insertFeed conn feedUrl
     pure [res]
 
 removeFeed' :: URL -> AppM ()

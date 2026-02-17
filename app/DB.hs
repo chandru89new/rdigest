@@ -41,8 +41,8 @@ getFeedLinksWithParams conn PageParams{..} maybeFeedId =
     Nothing -> query' conn (fromString "select link, title, updated from feed_items order by updated desc limit ? offset ?") (pageLimit, pageOffset)
     Just v -> query' conn (fromString "select link, title, updated from feed_items where feed_id = ? order by updated desc limit ? offset ?") (v, pageLimit, pageOffset)
 
-insertFeed :: URL -> Connection -> IO (Int, URL)
-insertFeed feedUrl conn = do
+insertFeed :: Connection -> URL -> IO (Int, URL)
+insertFeed conn feedUrl = do
   _ <- setPragmas conn
   let q = fromString "INSERT INTO feeds (title,url) VALUES (?,?);"
   let q' = fromString "SELECT id from feeds where url = ?;"
@@ -213,3 +213,6 @@ getTotalDigests conn = do
   pure $ case total of
     (h : _) -> (fromOnly h)
     _ -> 0
+
+insertFeeds :: Connection -> [URL] -> IO [(Int, URL)]
+insertFeeds conn = mapM (insertFeed conn)
