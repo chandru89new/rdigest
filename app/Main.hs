@@ -71,7 +71,7 @@ main' command =
       liftIO $ putStrLn $ intercalate "\n" (map (\(title, url) -> fromMaybe url title ++ " (" ++ url ++ ")") feeds)
     ShowVersion -> putStrLn ("rdigest v" ++ showVersion version)
     ShowHelp -> putStrLn progHelp
-    UpdateFeeds -> runAppM updateAllFeeds
+    UpdateFeeds -> runAppM updateAllFeedsM
     StartServer port -> startServer (fromMaybe 5500 port)
     ShowDigest n -> do
       let offset = case n of

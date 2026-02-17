@@ -10,9 +10,20 @@
 
 <body>
   <script src="/elm.js"></script>
-  <script> Elm.Main.init({
-      flags: { port_: window.location.port }
-    }) </script>
+  <script>
+    const app = Elm.Main.init();
+    app.ports.showPrompt.subscribe(([str, opts]) => {
+      const v = prompt(str, opts.defaulValue);
+      app.ports.getPromptResponse.send([opts.key, v]);
+    })
+    app.ports.showConfirm.subscribe(([str, opts]) => {
+      const v = confirm(str);
+      if (v) { app.ports.getConfirmResponse.send([opts.key, opts.value]) }
+    })
+    app.ports.showAlert.subscribe(str => {
+      alert(str)
+    })
+  </script>
 </body>
 
 </html>

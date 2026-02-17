@@ -13,11 +13,14 @@
 
 module Server where
 
+import Control.Concurrent
 import Control.Exception (try)
+import Control.Monad (join)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
 import DB
 import Data.Aeson
+import Data.Aeson.Types (parseField, parseFieldMaybe, parseMaybe)
 import Data.ByteString hiding (isSuffixOf, pack)
 import qualified Data.ByteString.Char8 as BS
 import Data.FileEmbed
@@ -83,7 +86,7 @@ startServer port = do
                 ( \x -> case x of
                     [] -> do
                       status status404
-                      json $ object ["error" .= ("Not found" :: Text)]
+                      json $ object ["error" .= appErrToObj (GeneralError "No feeds found.")]
                     (h : _) -> json $ toJSON h
                 )
                 $ withResource pool (getFeed fid)
@@ -91,19 +94,25 @@ startServer port = do
               pageParams <- extractPageParams reqData
               runApiFn
                 (errWithStatus status400)
-                (\x -> json $ object ["feeds" .= toJSON x, "params" .= toJSON pageParams])
-                $ withResource pool (flip getFeedsListWithParams pageParams)
+                (\(x, total) -> json $ object ["feeds" .= toJSON x, "params" .= toJSON pageParams, "total" .= toJSON total])
+                $ withResource
+                  pool
+                  ( \conn -> do
+                      lfr <- getFeedsListWithParams conn pageParams
+                      total <- getTotalFeeds conn
+                      pure (lfr, total)
+                  )
             (Feeds, Add) -> do
-              AddFeedReq{..} <- parseRequest reqData :: ActionM AddFeedReq
-              case addFeedUrls of
-                (h : _) -> do
+              let urls = reqData >>= parseMaybe (withObject "" (.: "urls")) :: Maybe [String]
+              case urls of
+                Just (h : _) -> do
                   runApiFn
                     (errWithStatus status400)
                     (\(fid, furl) -> json $ object ["id" .= fid, "url" .= furl])
                     $ withResource pool (insertFeed h)
                 _ -> do
                   status status400
-                  json $ object ["error" .= ("Need at least one feed." :: Text)]
+                  json $ object ["error" .= appErrToObj (GeneralError "Need at least one url in the `urls`.")]
               finish
             (Feeds, Remove) -> do
               url <- parseRequest reqData :: ActionM String
@@ -111,18 +120,39 @@ startServer port = do
                 (errWithStatus status400)
                 (\_ -> status status204)
                 $ withResource pool (removeFeed url)
+            (Feeds, Refresh) -> do
+              runApiFn
+                (errWithStatus status400)
+                (\_ -> status status204)
+                $ withResource pool (forkIO . updateAllFeeds)
+            (Feeds, Import) -> do
+              opml <- parseRequest reqData :: ActionM String
+              runApiFn
+                (errWithStatus status400)
+                (\_ -> status status204)
+                -- \$ withResource pool (forkIO . updateAllFeeds)
+                $ do
+                  print opml
+                  pure ()
             (Links, List) -> do
               pageParams <- extractPageParams reqData
+              let feedId = join $ reqData >>= (parseMaybe (withObject "req" (.:? "feed_id"))) :: Maybe Int
               runApiFn
                 (errWithStatus status400)
                 (\links -> json $ object ["links" .= toJSON links, "params" .= toJSON pageParams])
-                $ withResource pool (flip getFeedLinksWithParams pageParams)
+                $ withResource pool (\c -> getFeedLinksWithParams c pageParams feedId)
             (Digests, List) -> do
               pageParams <- extractPageParams reqData
               runApiFn
                 (errWithStatus status400)
-                (json . toJSON)
-                $ withResource pool (flip getDigests pageParams)
+                (\(x, t) -> json $ object ["digests" .= toJSON x, "total" .= t, "params" .= toJSON pageParams])
+                $ withResource
+                  pool
+                  ( \conn -> do
+                      total <- getTotalDigests conn
+                      res <- getDigests conn pageParams
+                      pure (res, total)
+                  )
             (Digests, Get) -> do
               date <- if (isJust reqData) then parseRequest reqData else pure Nothing :: ActionM (Maybe String)
               runApiFn
@@ -135,7 +165,7 @@ startServer port = do
             (Echo, _) -> json $ object ["request" .= show r]
             _ -> do
               status status400
-              json $ object ["error" .= ("Invalid resource or action" :: Text), "request" .= show r]
+              json $ object ["error" .= appErrToObj (GeneralError "Invalid resource or action.")]
 
 -- HELPERS
 

@@ -1,8 +1,10 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 import Browser
 import Browser.Navigation as Nav
 import Dict exposing (Dict)
+import File exposing (File)
+import File.Select
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
@@ -10,6 +12,7 @@ import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
 import String exposing (fromInt)
+import Task
 import Url exposing (Url)
 import Url.Parser exposing ((</>), parse)
 
@@ -18,7 +21,7 @@ import Url.Parser exposing ((</>), parse)
 -- MAIN
 
 
-main : Program { port_ : String } Model Msg
+main : Program () Model Msg
 main =
     Browser.application
         { init = init
@@ -32,16 +35,18 @@ main =
 
 
 -- TYPES
+-- MODEL
 
 
 type alias Model =
     { key : Nav.Key
     , url : Url
     , apiEndpoint : String
-    , feeds : RemoteData String (List Feed)
+    , feeds : RemotePaginatedData String (List Feed)
     , latestDigest : RemoteData String Digest
     , digests : RemotePaginatedData String (List String)
     , currPage : Page
+    , digestSearchTerm : String
     }
 
 
@@ -49,13 +54,30 @@ type alias PageParams =
     { limit : Int }
 
 
+
+-- MSG
+
+
 type Msg
     = UrlRequested Browser.UrlRequest
     | UrlChanged Url
-    | GotFeedsList (Result String (List Feed))
+    | ShowPrompt String Encode.Value
+    | ShowConfirm String Encode.Value
+    | ShowAlert String
+    | GotFeedsList (Result String ( List Feed, PageParams, Int ))
     | GotDigest (Result String Digest)
-    | GotDigests (Result String ( List String, PageParams ))
+    | GotDigests (Result String ( List String, PageParams, Int ))
     | GetDigest PageParams
+    | GetFeeds PageParams
+    | UpdateDigestSearchTerm String
+    | RefreshFeed
+    | TriggerFileUpload
+    | UploadedOpmlFile File
+    | ImportFeeds (Result String String)
+    | AddFeedResult (Result String ())
+    | GotPromptResponse ( String, String )
+    | GotConfirmResponse ( String, Encode.Value )
+    | NoOp
 
 
 type alias Feed =
@@ -74,7 +96,7 @@ type RemoteData e a
 type RemotePaginatedData e a
     = Loading_ PageParams
     | Error_ e PageParams
-    | Loaded_ a PageParams
+    | Loaded_ a PageParams Int -- Loaded_ (data) (pageparams like limit/offset) (total_count as int)
 
 
 type alias Digest =
@@ -102,11 +124,28 @@ type Page
 -- INIT
 
 
-init : { port_ : String } -> Url -> Nav.Key -> ( Model, Cmd Msg )
-init { port_ } url key =
+init : () -> Url -> Nav.Key -> ( Model, Cmd Msg )
+init () url key =
     let
         initModel =
-            { apiEndpoint = "http://localhost:" ++ port_ ++ "/api/v1", key = key, url = url, digests = Loading_ { limit = 10 }, feeds = Loading, latestDigest = Loading, currPage = parseUrl url }
+            { apiEndpoint =
+                (if url.protocol == Url.Https then
+                    "https://"
+
+                 else
+                    "http://"
+                )
+                    ++ url.host
+                    ++ Maybe.withDefault "" (Maybe.map (\p -> ":" ++ fromInt p) url.port_)
+                    ++ "/api/v1"
+            , key = key
+            , url = url
+            , digests = Loading_ { limit = 10 }
+            , feeds = Loading_ { limit = 10 }
+            , latestDigest = Loading
+            , currPage = parseUrl url
+            , digestSearchTerm = ""
+            }
     in
     ( initModel, Cmd.batch [ pageCmdsToRun initModel <| parseUrl url ] )
 
@@ -118,6 +157,69 @@ init { port_ } url key =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        NoOp ->
+            ( model, Cmd.none )
+
+        GotConfirmResponse ( key, value ) ->
+            case ( key, value ) of
+                ( "deleteFeed", url ) ->
+                    let
+                        id_ =
+                            Decode.decodeValue Decode.string url
+                    in
+                    case id_ of
+                        Ok v ->
+                            ( model, deleteFeed model v )
+
+                        Err _ ->
+                            ( model, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        GotPromptResponse ( key, value ) ->
+            let
+                _ =
+                    Debug.log "kv" ( key, value )
+            in
+            case key of
+                "addFeed" ->
+                    ( model, addFeed model value )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AddFeedResult res ->
+            case res of
+                Ok _ ->
+                    ( model, getFeedsList model (getPageParams model.feeds) )
+
+                Err e ->
+                    ( model, showAlert e )
+
+        TriggerFileUpload ->
+            ( model, triggerFileUpload )
+
+        UploadedOpmlFile file ->
+            let
+                _ =
+                    Debug.log "called" ""
+
+                _ =
+                    Debug.log "file" file
+            in
+            ( model, File.toString file |> Task.mapError Debug.toString |> Task.attempt ImportFeeds )
+
+        ImportFeeds opml ->
+            let
+                _ =
+                    Debug.log "opml" opml
+            in
+            ( model, Cmd.none )
+
+        RefreshFeed ->
+            ( model, Cmd.batch [ refreshFeed model, showAlert "Started refresh in the background. It may take several minutes. Check the terminal (where you started rdigest) for updates." ] )
+
         UrlRequested urlRequest ->
             case urlRequest of
                 Browser.Internal url ->
@@ -135,28 +237,56 @@ update msg model =
                 page =
                     parseUrl url
 
+                feeds =
+                    case page of
+                        FeedsPage ->
+                            Loading_ (getPageParams model.feeds)
+
+                        _ ->
+                            model.feeds
+
+                digests =
+                    case page of
+                        DigestsPage _ ->
+                            Loading_ (getPageParams model.digests)
+
+                        _ ->
+                            model.digests
+
                 newModel =
-                    { model | url = url, currPage = parseUrl url }
+                    { model | url = url, feeds = feeds, digests = digests, currPage = parseUrl url }
             in
             ( newModel
             , pageCmdsToRun newModel page
             )
 
+        UpdateDigestSearchTerm str ->
+            ( { model | digestSearchTerm = str }, Cmd.none )
+
+        ShowPrompt prompt value ->
+            ( model, showPrompt ( prompt, value ) )
+
+        ShowConfirm prompt value ->
+            ( model, showConfirm ( prompt, value ) )
+
+        ShowAlert m ->
+            ( model, showAlert m )
+
         GotFeedsList res ->
             case res of
                 Err e ->
-                    ( { model | feeds = Error e }, Cmd.none )
+                    ( { model | feeds = Error_ e (getPageParams model.feeds) }, Cmd.none )
 
-                Ok feeds ->
-                    ( { model | feeds = Loaded feeds }, Cmd.none )
+                Ok ( feeds, p, total ) ->
+                    ( { model | feeds = Loaded_ feeds p total }, Cmd.none )
 
         GotDigests res ->
             case res of
                 Err e ->
                     ( { model | digests = Error_ e (getPageParams model.digests) }, Cmd.none )
 
-                Ok ( digests, newPageParams ) ->
-                    ( { model | digests = Loaded_ digests newPageParams }, Cmd.none )
+                Ok ( digests, newPageParams, total ) ->
+                    ( { model | digests = Loaded_ digests newPageParams total }, Cmd.none )
 
         GotDigest res ->
             case res of
@@ -169,6 +299,9 @@ update msg model =
         GetDigest pageParams ->
             ( model, getDigests model pageParams )
 
+        GetFeeds pageParams ->
+            ( model, getFeedsList model pageParams )
+
 
 
 -- SUBS
@@ -176,7 +309,7 @@ update msg model =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Sub.none
+    Sub.batch [ getPromptResponse GotPromptResponse, getConfirmResponse GotConfirmResponse ]
 
 
 
@@ -185,22 +318,16 @@ subscriptions _ =
 
 viewLinkGroup : ( ( String, String ), List LinkItem ) -> Html Msg
 viewLinkGroup ( group, links ) =
-    div []
-        [ details []
-            [ summary [ class "cursor-pointer" ]
-                [ text <|
-                    Tuple.second group
-                        ++ "("
-                        ++ fromInt (List.length links)
-                        ++ ")"
-                ]
-            , div [ class "mb-6 mt-3 flex flex-col gap-y-2.5" ] <| List.map viewLink links
+    div [ class "p-4 border rounded border-slate-200" ]
+        [ h3 [ class "font-bold" ]
+            [ text <| String.join "" [ Tuple.second group, " (", fromInt (List.length links), ")" ]
             ]
+        , ul [ class "mt-3 space-y-4 list-disc list-outside ml-4" ] <| List.map viewLink links
         ]
 
 
-viewLatestDigest : RemoteData String Digest -> Html Msg
-viewLatestDigest r =
+viewLatestDigest : String -> RemoteData String Digest -> Html Msg
+viewLatestDigest searchTerm r =
     case r of
         Loading ->
             div [] [ text "Loading..." ]
@@ -209,35 +336,37 @@ viewLatestDigest r =
             div [] [ text e ]
 
         Loaded digest ->
-            div [ class "flex flex-col gap-y-2.5" ] [ viewDigest digest ]
+            let
+                digestFiltered =
+                    Digest digest.date
+                        (List.filter
+                            (\item ->
+                                if String.length (String.trim <| String.toLower searchTerm) == 0 then
+                                    True
+
+                                else
+                                    [ item.link
+                                    , item.feedUrl
+                                    , Maybe.withDefault item.link item.title
+                                    , Maybe.withDefault item.feedUrl item.feedTitle
+                                    ]
+                                        |> List.map String.toLower
+                                        |> List.any (\s -> String.contains (String.toLower searchTerm) s)
+                            )
+                            digest.links
+                        )
+            in
+            div [ class "flex flex-col gap-y-2.5" ] [ viewDigest digestFiltered ]
 
 
 viewLink : LinkItem -> Html Msg
-viewLink { link, title, feedTitle } =
-    a [ href link, target "_blank", class "text-black! flex flex-col gap-y-0.5 p-3 rounded border border-slate-200 cursor-pointer hover:bg-blue-50" ]
-        [ a [ href link, target "_blank" ] [ text (Maybe.withDefault link title) ]
-        , span [ class "text-xs flex gap-x-2" ]
-            [ span
-                [ class
-                    (if Maybe.Nothing == feedTitle then
-                        "hidden"
-
-                     else
-                        ""
-                    )
+viewLink { link, title } =
+    li []
+        [ span [ class "flex flex-col gap-y-0.5" ]
+            [ a [ href link, target "_blank" ] [ text (Maybe.withDefault link title) ]
+            , span [ class "text-xs opacity-70" ]
+                [ text <| showUrl link
                 ]
-                [ text (Maybe.withDefault "" feedTitle) ]
-            , span
-                [ class
-                    (if feedTitle == Maybe.Nothing then
-                        "hidden"
-
-                     else
-                        ""
-                    )
-                ]
-                [ text "•" ]
-            , span [] [ text <| showUrl link ]
             ]
         ]
 
@@ -251,11 +380,29 @@ viewDigestsList model =
         Error_ e _ ->
             div [] [ text e ]
 
-        Loaded_ ls { limit } ->
-            div [ class "flex flex-col gap-y-2" ] <|
-                (List.map (\s -> a [ class "inline-flex", href (String.join "/" [ "/digests", s ]) ] [ text <| toFriendlyDate s ]) ls
-                    ++ [ span [ class "text-blue-600 cursor-pointer", onClick (GetDigest { limit = limit + 10 }) ] [ text "Load more..." ] ]
-                )
+        Loaded_ ls { limit } total ->
+            if List.length ls > 0 then
+                div [ class "flex flex-col gap-y-3" ] <|
+                    (List.map (\s -> a [ class "border border-slate-200 rounded-lg p-3", href (String.join "/" [ "/digests", s ]) ] [ text <| toFriendlyDate s ]) ls
+                        ++ [ span
+                                [ class
+                                    (String.join " "
+                                        [ "text-blue-600 cursor-pointer"
+                                        , if limit >= total then
+                                            "hidden"
+
+                                          else
+                                            ""
+                                        ]
+                                    )
+                                , onClick (GetDigest { limit = limit + 10000 })
+                                ]
+                                [ text "Load more..." ]
+                           ]
+                    )
+
+            else
+                div [ class "opacity-60" ] [ text "No digests yet. Try refreshing the feeds?" ]
 
 
 viewDigest : Digest -> Html Msg
@@ -264,24 +411,96 @@ viewDigest { date, links } =
         grouped =
             groupDigestLinksByFeedUrl links
     in
-    div [ class "flex flex-col gap-y-2" ]
-        [ h3 [] [ text (toFriendlyDate date) ]
-        , div [ class "flex flex-col gap-y-1.5" ] <|
-            List.map viewLinkGroup (Dict.toList grouped)
+    div [ class "flex flex-col gap-y-4" ]
+        [ h3 [] [ text <| String.join "" [ toFriendlyDate date, " ", "(", fromInt <| List.length links, ")" ] ]
+        , input [ class "p-2 text-sm border rounded-md border-slate-200 w-full", placeholder "Search in digest...", onInput UpdateDigestSearchTerm ] []
+        , div [ class "grid grid-cols-1 lg:grid-cols-3 gap-4" ] <|
+            List.map viewLinkGroup (List.reverse <| List.sortBy (\( _, ls ) -> List.length ls) <| Dict.toList grouped)
         ]
 
 
-viewFeedsList : RemoteData String (List Feed) -> Html Msg
-viewFeedsList r =
-    case r of
-        Loading ->
+viewFeedsList : Model -> Html Msg
+viewFeedsList model =
+    case model.feeds of
+        Loading_ _ ->
             div [] [ text "Loading feeds..." ]
 
-        Error e ->
+        Error_ e p ->
             div [] [ text e ]
 
-        Loaded feeds ->
-            div [ class "flex flex-col gap-y-1.5" ] <| List.map (\f -> a [ href f.url ] [ text (Maybe.withDefault f.url f.title) ]) feeds
+        Loaded_ feeds p total ->
+            let
+                noFeeds =
+                    List.length feeds == 0
+            in
+            div [ class "flex flex-col gap-y-3" ]
+                [ div [ class "flex gap-x-3" ]
+                    [ button [ onClick (ShowPrompt "Enter feed URL:" (Encode.object [ ( "key", Encode.string "addFeed" ), ( "defaultValue", Encode.string "" ) ])), class "" ]
+                        [ text "+ Add RSS feed" ]
+                    , button [ onClick TriggerFileUpload, class "" ]
+                        [ text "+ Import OPML" ]
+                    ]
+                , div
+                    [ class
+                        ("opacity-60 mt-6 "
+                            ++ (if noFeeds then
+                                    "hidden"
+
+                                else
+                                    ""
+                               )
+                        )
+                    ]
+                    [ text <| String.join "" [ "Total: ", fromInt total, " feeds." ] ]
+                , div
+                    [ class
+                        ("pt-6 flex flex-col gap-y-3 "
+                            ++ (if noFeeds then
+                                    "hidden"
+
+                                else
+                                    ""
+                               )
+                        )
+                    ]
+                  <|
+                    List.map
+                        (\f ->
+                            div [ class "border rounded-lg border-slate-200 p-3 flex gap-x-4 items-center items-start justify-between" ]
+                                [ span [ class "font-semibold" ] [ text (Maybe.withDefault f.url f.title) ]
+                                , span [ class "flex items-center gap-x-2" ]
+                                    [ span [ class "hidden cursor-pointer text-xs text-blue-600", onClick (ShowPrompt "Change title to:" (Maybe.withDefault f.url f.title |> Encode.string)) ] [ text "Edit name" ]
+                                    , span [ class "hidden" ] [ text "•" ]
+                                    , span [ class "cursor-pointer text-xs text-red-500", onClick <| ShowConfirm "Sure? This will delete the feed and the links from it. You can't undo it." (Encode.object [ ( "key", Encode.string "deleteFeed" ), ( "value", Encode.string f.url ) ]) ] [ text "Delete" ]
+                                    ]
+                                ]
+                        )
+                        feeds
+                , div
+                    [ class
+                        (if List.length feeds == 0 then
+                            "opacity-60"
+
+                         else
+                            "hidden"
+                        )
+                    ]
+                    [ text "You don't have any feeds. Try adding a feed or importing from an OPML file?" ]
+                , span
+                    [ class <|
+                        String.join " "
+                            [ "text-blue-600 cursor-pointer"
+                            , if p.limit >= total then
+                                "hidden"
+
+                              else
+                                ""
+                            ]
+                    , onClick <| GetFeeds { limit = p.limit + 100 }
+                    ]
+                    [ text "Load more..."
+                    ]
+                ]
 
 
 view : Model -> Browser.Document Msg
@@ -300,21 +519,23 @@ view model =
     in
     { title = title
     , body =
-        [ div [ class "flex flex-col gap-y-4" ]
+        [ div [ id "app", class "flex flex-col gap-y-4" ]
             [ h1 [] [ a [ href "/" ] [ text "rdigest — dashboard" ] ]
             , div [ class "flex gap-x-3" ]
                 [ a [ href "/digests" ] [ text "View digests" ]
                 , span [] [ text <| "•" ]
                 , a [ href "/feeds" ] [ text "View/manage feeds" ]
+                , span [] [ text <| "•" ]
+                , span [ onClick RefreshFeed, class "text-green-500 cursor-pointer" ] [ text "Refresh feeds" ]
                 ]
             , hr [] []
             , div []
                 [ case model.currPage of
                     DashboardPage ->
-                        viewLatestDigest model.latestDigest
+                        viewLatestDigest model.digestSearchTerm model.latestDigest
 
                     FeedsPage ->
-                        div [] [ text "Feeds page TODO" ]
+                        div [] [ viewFeedsList model ]
 
                     DigestsPage d ->
                         case d of
@@ -322,7 +543,7 @@ view model =
                                 viewDigestsList model
 
                             Just _ ->
-                                viewLatestDigest model.latestDigest
+                                viewLatestDigest model.digestSearchTerm model.latestDigest
                 ]
             ]
         ]
@@ -331,6 +552,11 @@ view model =
 
 
 -- UTILS/HELPERS
+
+
+triggerFileUpload : Cmd Msg
+triggerFileUpload =
+    File.Select.file [] UploadedOpmlFile
 
 
 encodePageParams : PageParams -> Encode.Value
@@ -347,7 +573,7 @@ getPageParams r =
         Error_ _ a ->
             a
 
-        Loaded_ _ a ->
+        Loaded_ _ a _ ->
             a
 
 
@@ -358,7 +584,7 @@ pageCmdsToRun model page =
             Cmd.batch [ getDigestForDate model Nothing ]
 
         FeedsPage ->
-            Cmd.batch [ getFeedsList model ]
+            Cmd.batch [ getFeedsList model { limit = Basics.clamp 100 10000 (getPageParams model.digests).limit } ]
 
         DigestsPage d ->
             Cmd.batch
@@ -441,7 +667,7 @@ toFriendlyDate dateString =
     in
     case parts of
         year :: month :: date :: _ ->
-            String.join "" [ date, ", ", toMonthString month, " ", year ]
+            String.join "" [ date, " ", toMonthString month, ", ", year ]
 
         _ ->
             dateString
@@ -485,7 +711,7 @@ showUrl url =
             url
 
         Just u ->
-            u.host ++ u.path ++ Maybe.withDefault "" u.query ++ Maybe.withDefault "" u.fragment
+            u.host ++ u.path ++ Maybe.withDefault "" (Maybe.map ((++) "?") u.query) ++ Maybe.withDefault "" (Maybe.map ((++) "#") u.fragment)
 
 
 httpErrorToString : Http.Error -> String
@@ -495,7 +721,12 @@ httpErrorToString err =
             str
 
         Http.BadStatus int ->
-            "Error: " ++ fromInt int
+            case int of
+                404 ->
+                    "Nothing found."
+
+                _ ->
+                    "Error: " ++ fromInt int
 
         Http.NetworkError ->
             "Network error."
@@ -547,14 +778,33 @@ feedListDecoder =
     Decode.list feedDecoder
 
 
-paramsDecoder : Decode.Decoder { limit : Maybe Int, offset : Maybe Int }
+paramsDecoder : Decode.Decoder { limit : Int, offset : Int }
 paramsDecoder =
     let
         limit =
             Decode.field "limit" (Decode.maybe Decode.int)
+                |> Decode.andThen
+                    (\v ->
+                        case v of
+                            Nothing ->
+                                Decode.succeed 10
 
+                            Just a ->
+                                Decode.succeed a
+                    )
+
+        offset : Decode.Decoder Int
         offset =
             Decode.field "offset" (Decode.maybe Decode.int)
+                |> Decode.andThen
+                    (\v ->
+                        case v of
+                            Nothing ->
+                                Decode.succeed 0
+
+                            Just a ->
+                                Decode.succeed a
+                    )
     in
     Decode.map2 (\l o -> { limit = l, offset = o }) limit offset
 
@@ -583,11 +833,93 @@ digestDecoder =
 -- API CALLS
 
 
-getFeedsList : Model -> Cmd Msg
-getFeedsList model =
+deleteFeed : Model -> String -> Cmd Msg
+deleteFeed model feedUrl =
     Http.post
         { url = model.apiEndpoint
-        , body = Http.jsonBody (makePostBody "feeds" "list" Nothing)
+        , body = Http.jsonBody (makePostBody "feeds" "remove" (Encode.string feedUrl |> Just))
+        , expect =
+            Http.expectStringResponse
+                (\res ->
+                    case res of
+                        Err e ->
+                            ShowAlert e
+
+                        Ok _ ->
+                            GetFeeds (getPageParams model.feeds)
+                )
+                (handleRawHttpResponse (Decode.succeed ()))
+        }
+
+
+handleRawHttpResponse : Decode.Decoder a -> Http.Response String -> Result String a
+handleRawHttpResponse decoder response =
+    let
+        errBodyDecoder =
+            Decode.map2 (\a b -> ( a, b )) (Decode.at [ "error", "type" ] Decode.string) (Decode.at [ "error", "message" ] Decode.string)
+    in
+    case response of
+        Http.GoodStatus_ metadata body ->
+            let
+                b =
+                    if String.trim body == "" then
+                        "{}"
+
+                    else
+                        body
+            in
+            case Decode.decodeString decoder b of
+                Ok v ->
+                    Ok v
+
+                Err e ->
+                    Err (Decode.errorToString e)
+
+        Http.BadStatus_ metadata body ->
+            if metadata.statusCode >= 400 && metadata.statusCode < 500 then
+                case Decode.decodeString errBodyDecoder body of
+                    Ok ( type_, msg_ ) ->
+                        Err <| ([ type_, msg_ ] |> String.join ": ")
+
+                    Err _ ->
+                        Err ([ "I got an error status for that:", fromInt metadata.statusCode, metadata.statusText ] |> String.join " ")
+
+            else
+                Err ([ "I got an error status for that:", fromInt metadata.statusCode, metadata.statusText ] |> String.join " ")
+
+        Http.BadUrl_ string ->
+            Err ([ "I think the requested URI is invalid or malformed.", "We tried to call:", string ] |> String.join " ")
+
+        Http.NetworkError_ ->
+            Err "Uh oh, there was some network issue. Try again?"
+
+        Http.Timeout_ ->
+            Err "The server has taken too long to process this."
+
+
+addFeed : Model -> String -> Cmd Msg
+addFeed model url =
+    Http.post
+        { url = model.apiEndpoint
+        , body = Http.jsonBody (makePostBody "feeds" "add" (Encode.object [ ( "urls", Encode.list Encode.string [ url ] ) ] |> Just))
+        , expect = Http.expectStringResponse AddFeedResult (handleRawHttpResponse (Decode.succeed ()))
+        }
+
+
+refreshFeed : Model -> Cmd Msg
+refreshFeed model =
+    Http.post
+        { url = model.apiEndpoint
+        , body = Http.jsonBody (makePostBody "feeds" "refresh" Nothing)
+        , expect = Http.expectWhatever (\_ -> NoOp)
+        }
+
+
+getFeedsList : Model -> PageParams -> Cmd Msg
+getFeedsList model p =
+    Http.post
+        { url = model.apiEndpoint
+        , body = Http.jsonBody (makePostBody "feeds" "list" <| Just (encodePageParams p))
         , expect =
             Http.expectJson
                 (\res ->
@@ -598,7 +930,12 @@ getFeedsList model =
                         Ok f ->
                             GotFeedsList (Ok f)
                 )
-                (Decode.field "feeds" feedListDecoder)
+                (Decode.map3
+                    (\a b c -> ( a, b, c ))
+                    (Decode.field "feeds" feedListDecoder)
+                    (Decode.succeed p)
+                    (Decode.field "total" Decode.int)
+                )
         }
 
 
@@ -631,10 +968,37 @@ getDigests model pageParams =
                 (\res ->
                     case res of
                         Err e ->
-                            GotDigests (Err <| httpErrorToString e)
+                            case e of
+                                Http.BadStatus 404 ->
+                                    GotDigests (Err "No digest here. Maybe try adding feeds / refreshing feeds?")
+
+                                _ ->
+                                    GotDigests (Err <| httpErrorToString e)
 
                         Ok f ->
                             GotDigests (Ok f)
                 )
-                (Decode.map2 (\a b -> ( a, b )) (Decode.list Decode.string) (Decode.succeed pageParams))
+                (Decode.map3 (\a b c -> ( a, b, c )) (Decode.field "digests" <| Decode.list Decode.string) (Decode.succeed pageParams) (Decode.field "total" Decode.int))
         }
+
+
+
+-- PORTS
+
+
+port showAlert : String -> Cmd msg
+
+
+port showPrompt : ( String, Encode.Value ) -> Cmd msg
+
+
+port showConfirm : ( String, Encode.Value ) -> Cmd msg
+
+
+port confirmRemoveFeed : (Bool -> msg) -> Sub msg
+
+
+port getPromptResponse : (( String, String ) -> msg) -> Sub msg
+
+
+port getConfirmResponse : (( String, Encode.Value ) -> msg) -> Sub msg

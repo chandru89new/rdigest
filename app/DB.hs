@@ -35,8 +35,11 @@ getFeedsListWithParams conn PageParams{..} = query' conn (fromString "select id,
 getFeed :: Int -> Connection -> IO [ListFeedsResponse]
 getFeed feedId conn = query' conn (fromString "select id, title, url from feeds where id = ?") (Only feedId)
 
-getFeedLinksWithParams :: Connection -> PageParams -> IO [FeedLinksResponse]
-getFeedLinksWithParams conn PageParams{..} = query' conn (fromString "select link, title, updated from feed_items order by updated desc limit ? offset ?") (pageLimit, pageOffset)
+getFeedLinksWithParams :: Connection -> PageParams -> Maybe Int -> IO [FeedLinksResponse]
+getFeedLinksWithParams conn PageParams{..} maybeFeedId =
+  case maybeFeedId of
+    Nothing -> query' conn (fromString "select link, title, updated from feed_items order by updated desc limit ? offset ?") (pageLimit, pageOffset)
+    Just v -> query' conn (fromString "select link, title, updated from feed_items where feed_id = ? order by updated desc limit ? offset ?") (v, pageLimit, pageOffset)
 
 insertFeed :: URL -> Connection -> IO (Int, URL)
 insertFeed feedUrl conn = do
@@ -163,10 +166,16 @@ processFeeds urls = do
       Left e -> showAppError e
       Right _ -> pure ()
 
-updateAllFeeds :: AppM ()
-updateAllFeeds = do
+updateAllFeedsM :: AppM ()
+updateAllFeedsM = do
   urls <- getFeedUrlsFromDB
   liftIO $ processFeeds urls
+
+updateAllFeeds :: Connection -> IO ()
+updateAllFeeds conn = do
+  res <- query_' conn selectUrlFromFeeds :: IO [(Int, String)]
+  _ <- processFeeds res
+  pure ()
 
 insertFeedItem :: Connection -> (Int, FeedItem) -> IO (Maybe FeedItem)
 insertFeedItem conn (feedId, feedItem@FeedItem{..}) = do
@@ -190,3 +199,17 @@ getDigestForDate conn date = do
       ((updated, _, _, _, _, _) : _) -> Just $ Digest updated (map f res)
  where
   f (_, link, title, feedId, feedTitle, feedUrl) = DigestLink link title feedId feedTitle feedUrl
+
+getTotalFeeds :: Connection -> IO Int
+getTotalFeeds conn = do
+  total <- query_' conn ("select count(id) from feeds;") :: IO [Only Int]
+  pure $ case total of
+    (h : _) -> (fromOnly h)
+    _ -> 0
+
+getTotalDigests :: Connection -> IO Int
+getTotalDigests conn = do
+  total <- query_' conn ("SELECT COUNT(DISTINCT updated) FROM feed_items;") :: IO [Only Int]
+  pure $ case total of
+    (h : _) -> (fromOnly h)
+    _ -> 0

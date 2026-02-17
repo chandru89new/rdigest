@@ -1,9 +1,19 @@
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&display=swap");
+
 @import "tailwindcss";
 
 body {
-  @apply p-3;
+  font-family: "Bricolage Grotesque", monospace;
+}
+
+#app {
+  @apply max-w-240 m-auto my-4 lg:my-8;
 }
 
 a {
   @apply text-blue-600;
+}
+
+button {
+  @apply bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-lg text-center flex items-center flex-nowrap not-disabled:cursor-pointer text-sm;
 }

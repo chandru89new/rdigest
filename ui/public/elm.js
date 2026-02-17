@@ -80,6 +80,271 @@ function A9(fun, a, b, c, d, e, f, g, h, i) {
 console.warn('Compiled in DEV mode. Follow the advice at https://elm-lang.org/0.19.1/optimize for better performance and smaller assets.');
 
 
+// EQUALITY
+
+function _Utils_eq(x, y)
+{
+	for (
+		var pair, stack = [], isEqual = _Utils_eqHelp(x, y, 0, stack);
+		isEqual && (pair = stack.pop());
+		isEqual = _Utils_eqHelp(pair.a, pair.b, 0, stack)
+		)
+	{}
+
+	return isEqual;
+}
+
+function _Utils_eqHelp(x, y, depth, stack)
+{
+	if (x === y)
+	{
+		return true;
+	}
+
+	if (typeof x !== 'object' || x === null || y === null)
+	{
+		typeof x === 'function' && _Debug_crash(5);
+		return false;
+	}
+
+	if (depth > 100)
+	{
+		stack.push(_Utils_Tuple2(x,y));
+		return true;
+	}
+
+	/**/
+	if (x.$ === 'Set_elm_builtin')
+	{
+		x = $elm$core$Set$toList(x);
+		y = $elm$core$Set$toList(y);
+	}
+	if (x.$ === 'RBNode_elm_builtin' || x.$ === 'RBEmpty_elm_builtin')
+	{
+		x = $elm$core$Dict$toList(x);
+		y = $elm$core$Dict$toList(y);
+	}
+	//*/
+
+	/**_UNUSED/
+	if (x.$ < 0)
+	{
+		x = $elm$core$Dict$toList(x);
+		y = $elm$core$Dict$toList(y);
+	}
+	//*/
+
+	for (var key in x)
+	{
+		if (!_Utils_eqHelp(x[key], y[key], depth + 1, stack))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+var _Utils_equal = F2(_Utils_eq);
+var _Utils_notEqual = F2(function(a, b) { return !_Utils_eq(a,b); });
+
+
+
+// COMPARISONS
+
+// Code in Generate/JavaScript.hs, Basics.js, and List.js depends on
+// the particular integer values assigned to LT, EQ, and GT.
+
+function _Utils_cmp(x, y, ord)
+{
+	if (typeof x !== 'object')
+	{
+		return x === y ? /*EQ*/ 0 : x < y ? /*LT*/ -1 : /*GT*/ 1;
+	}
+
+	/**/
+	if (x instanceof String)
+	{
+		var a = x.valueOf();
+		var b = y.valueOf();
+		return a === b ? 0 : a < b ? -1 : 1;
+	}
+	//*/
+
+	/**_UNUSED/
+	if (typeof x.$ === 'undefined')
+	//*/
+	/**/
+	if (x.$[0] === '#')
+	//*/
+	{
+		return (ord = _Utils_cmp(x.a, y.a))
+			? ord
+			: (ord = _Utils_cmp(x.b, y.b))
+				? ord
+				: _Utils_cmp(x.c, y.c);
+	}
+
+	// traverse conses until end of a list or a mismatch
+	for (; x.b && y.b && !(ord = _Utils_cmp(x.a, y.a)); x = x.b, y = y.b) {} // WHILE_CONSES
+	return ord || (x.b ? /*GT*/ 1 : y.b ? /*LT*/ -1 : /*EQ*/ 0);
+}
+
+var _Utils_lt = F2(function(a, b) { return _Utils_cmp(a, b) < 0; });
+var _Utils_le = F2(function(a, b) { return _Utils_cmp(a, b) < 1; });
+var _Utils_gt = F2(function(a, b) { return _Utils_cmp(a, b) > 0; });
+var _Utils_ge = F2(function(a, b) { return _Utils_cmp(a, b) >= 0; });
+
+var _Utils_compare = F2(function(x, y)
+{
+	var n = _Utils_cmp(x, y);
+	return n < 0 ? $elm$core$Basics$LT : n ? $elm$core$Basics$GT : $elm$core$Basics$EQ;
+});
+
+
+// COMMON VALUES
+
+var _Utils_Tuple0_UNUSED = 0;
+var _Utils_Tuple0 = { $: '#0' };
+
+function _Utils_Tuple2_UNUSED(a, b) { return { a: a, b: b }; }
+function _Utils_Tuple2(a, b) { return { $: '#2', a: a, b: b }; }
+
+function _Utils_Tuple3_UNUSED(a, b, c) { return { a: a, b: b, c: c }; }
+function _Utils_Tuple3(a, b, c) { return { $: '#3', a: a, b: b, c: c }; }
+
+function _Utils_chr_UNUSED(c) { return c; }
+function _Utils_chr(c) { return new String(c); }
+
+
+// RECORDS
+
+function _Utils_update(oldRecord, updatedFields)
+{
+	var newRecord = {};
+
+	for (var key in oldRecord)
+	{
+		newRecord[key] = oldRecord[key];
+	}
+
+	for (var key in updatedFields)
+	{
+		newRecord[key] = updatedFields[key];
+	}
+
+	return newRecord;
+}
+
+
+// APPEND
+
+var _Utils_append = F2(_Utils_ap);
+
+function _Utils_ap(xs, ys)
+{
+	// append Strings
+	if (typeof xs === 'string')
+	{
+		return xs + ys;
+	}
+
+	// append Lists
+	if (!xs.b)
+	{
+		return ys;
+	}
+	var root = _List_Cons(xs.a, ys);
+	xs = xs.b
+	for (var curr = root; xs.b; xs = xs.b) // WHILE_CONS
+	{
+		curr = curr.b = _List_Cons(xs.a, ys);
+	}
+	return root;
+}
+
+
+
+var _List_Nil_UNUSED = { $: 0 };
+var _List_Nil = { $: '[]' };
+
+function _List_Cons_UNUSED(hd, tl) { return { $: 1, a: hd, b: tl }; }
+function _List_Cons(hd, tl) { return { $: '::', a: hd, b: tl }; }
+
+
+var _List_cons = F2(_List_Cons);
+
+function _List_fromArray(arr)
+{
+	var out = _List_Nil;
+	for (var i = arr.length; i--; )
+	{
+		out = _List_Cons(arr[i], out);
+	}
+	return out;
+}
+
+function _List_toArray(xs)
+{
+	for (var out = []; xs.b; xs = xs.b) // WHILE_CONS
+	{
+		out.push(xs.a);
+	}
+	return out;
+}
+
+var _List_map2 = F3(function(f, xs, ys)
+{
+	for (var arr = []; xs.b && ys.b; xs = xs.b, ys = ys.b) // WHILE_CONSES
+	{
+		arr.push(A2(f, xs.a, ys.a));
+	}
+	return _List_fromArray(arr);
+});
+
+var _List_map3 = F4(function(f, xs, ys, zs)
+{
+	for (var arr = []; xs.b && ys.b && zs.b; xs = xs.b, ys = ys.b, zs = zs.b) // WHILE_CONSES
+	{
+		arr.push(A3(f, xs.a, ys.a, zs.a));
+	}
+	return _List_fromArray(arr);
+});
+
+var _List_map4 = F5(function(f, ws, xs, ys, zs)
+{
+	for (var arr = []; ws.b && xs.b && ys.b && zs.b; ws = ws.b, xs = xs.b, ys = ys.b, zs = zs.b) // WHILE_CONSES
+	{
+		arr.push(A4(f, ws.a, xs.a, ys.a, zs.a));
+	}
+	return _List_fromArray(arr);
+});
+
+var _List_map5 = F6(function(f, vs, ws, xs, ys, zs)
+{
+	for (var arr = []; vs.b && ws.b && xs.b && ys.b && zs.b; vs = vs.b, ws = ws.b, xs = xs.b, ys = ys.b, zs = zs.b) // WHILE_CONSES
+	{
+		arr.push(A5(f, vs.a, ws.a, xs.a, ys.a, zs.a));
+	}
+	return _List_fromArray(arr);
+});
+
+var _List_sortBy = F2(function(f, xs)
+{
+	return _List_fromArray(_List_toArray(xs).sort(function(a, b) {
+		return _Utils_cmp(f(a), f(b));
+	}));
+});
+
+var _List_sortWith = F2(function(f, xs)
+{
+	return _List_fromArray(_List_toArray(xs).sort(function(a, b) {
+		var ord = A2(f, a, b);
+		return ord === $elm$core$Basics$EQ ? 0 : ord === $elm$core$Basics$LT ? -1 : 1;
+	}));
+});
+
+
+
 var _JsArray_empty = [];
 
 function _JsArray_singleton(value)
@@ -525,271 +790,6 @@ function _Debug_regionToString(region)
 	}
 	return 'on lines ' + region.start.line + ' through ' + region.end.line;
 }
-
-
-
-// EQUALITY
-
-function _Utils_eq(x, y)
-{
-	for (
-		var pair, stack = [], isEqual = _Utils_eqHelp(x, y, 0, stack);
-		isEqual && (pair = stack.pop());
-		isEqual = _Utils_eqHelp(pair.a, pair.b, 0, stack)
-		)
-	{}
-
-	return isEqual;
-}
-
-function _Utils_eqHelp(x, y, depth, stack)
-{
-	if (x === y)
-	{
-		return true;
-	}
-
-	if (typeof x !== 'object' || x === null || y === null)
-	{
-		typeof x === 'function' && _Debug_crash(5);
-		return false;
-	}
-
-	if (depth > 100)
-	{
-		stack.push(_Utils_Tuple2(x,y));
-		return true;
-	}
-
-	/**/
-	if (x.$ === 'Set_elm_builtin')
-	{
-		x = $elm$core$Set$toList(x);
-		y = $elm$core$Set$toList(y);
-	}
-	if (x.$ === 'RBNode_elm_builtin' || x.$ === 'RBEmpty_elm_builtin')
-	{
-		x = $elm$core$Dict$toList(x);
-		y = $elm$core$Dict$toList(y);
-	}
-	//*/
-
-	/**_UNUSED/
-	if (x.$ < 0)
-	{
-		x = $elm$core$Dict$toList(x);
-		y = $elm$core$Dict$toList(y);
-	}
-	//*/
-
-	for (var key in x)
-	{
-		if (!_Utils_eqHelp(x[key], y[key], depth + 1, stack))
-		{
-			return false;
-		}
-	}
-	return true;
-}
-
-var _Utils_equal = F2(_Utils_eq);
-var _Utils_notEqual = F2(function(a, b) { return !_Utils_eq(a,b); });
-
-
-
-// COMPARISONS
-
-// Code in Generate/JavaScript.hs, Basics.js, and List.js depends on
-// the particular integer values assigned to LT, EQ, and GT.
-
-function _Utils_cmp(x, y, ord)
-{
-	if (typeof x !== 'object')
-	{
-		return x === y ? /*EQ*/ 0 : x < y ? /*LT*/ -1 : /*GT*/ 1;
-	}
-
-	/**/
-	if (x instanceof String)
-	{
-		var a = x.valueOf();
-		var b = y.valueOf();
-		return a === b ? 0 : a < b ? -1 : 1;
-	}
-	//*/
-
-	/**_UNUSED/
-	if (typeof x.$ === 'undefined')
-	//*/
-	/**/
-	if (x.$[0] === '#')
-	//*/
-	{
-		return (ord = _Utils_cmp(x.a, y.a))
-			? ord
-			: (ord = _Utils_cmp(x.b, y.b))
-				? ord
-				: _Utils_cmp(x.c, y.c);
-	}
-
-	// traverse conses until end of a list or a mismatch
-	for (; x.b && y.b && !(ord = _Utils_cmp(x.a, y.a)); x = x.b, y = y.b) {} // WHILE_CONSES
-	return ord || (x.b ? /*GT*/ 1 : y.b ? /*LT*/ -1 : /*EQ*/ 0);
-}
-
-var _Utils_lt = F2(function(a, b) { return _Utils_cmp(a, b) < 0; });
-var _Utils_le = F2(function(a, b) { return _Utils_cmp(a, b) < 1; });
-var _Utils_gt = F2(function(a, b) { return _Utils_cmp(a, b) > 0; });
-var _Utils_ge = F2(function(a, b) { return _Utils_cmp(a, b) >= 0; });
-
-var _Utils_compare = F2(function(x, y)
-{
-	var n = _Utils_cmp(x, y);
-	return n < 0 ? $elm$core$Basics$LT : n ? $elm$core$Basics$GT : $elm$core$Basics$EQ;
-});
-
-
-// COMMON VALUES
-
-var _Utils_Tuple0_UNUSED = 0;
-var _Utils_Tuple0 = { $: '#0' };
-
-function _Utils_Tuple2_UNUSED(a, b) { return { a: a, b: b }; }
-function _Utils_Tuple2(a, b) { return { $: '#2', a: a, b: b }; }
-
-function _Utils_Tuple3_UNUSED(a, b, c) { return { a: a, b: b, c: c }; }
-function _Utils_Tuple3(a, b, c) { return { $: '#3', a: a, b: b, c: c }; }
-
-function _Utils_chr_UNUSED(c) { return c; }
-function _Utils_chr(c) { return new String(c); }
-
-
-// RECORDS
-
-function _Utils_update(oldRecord, updatedFields)
-{
-	var newRecord = {};
-
-	for (var key in oldRecord)
-	{
-		newRecord[key] = oldRecord[key];
-	}
-
-	for (var key in updatedFields)
-	{
-		newRecord[key] = updatedFields[key];
-	}
-
-	return newRecord;
-}
-
-
-// APPEND
-
-var _Utils_append = F2(_Utils_ap);
-
-function _Utils_ap(xs, ys)
-{
-	// append Strings
-	if (typeof xs === 'string')
-	{
-		return xs + ys;
-	}
-
-	// append Lists
-	if (!xs.b)
-	{
-		return ys;
-	}
-	var root = _List_Cons(xs.a, ys);
-	xs = xs.b
-	for (var curr = root; xs.b; xs = xs.b) // WHILE_CONS
-	{
-		curr = curr.b = _List_Cons(xs.a, ys);
-	}
-	return root;
-}
-
-
-
-var _List_Nil_UNUSED = { $: 0 };
-var _List_Nil = { $: '[]' };
-
-function _List_Cons_UNUSED(hd, tl) { return { $: 1, a: hd, b: tl }; }
-function _List_Cons(hd, tl) { return { $: '::', a: hd, b: tl }; }
-
-
-var _List_cons = F2(_List_Cons);
-
-function _List_fromArray(arr)
-{
-	var out = _List_Nil;
-	for (var i = arr.length; i--; )
-	{
-		out = _List_Cons(arr[i], out);
-	}
-	return out;
-}
-
-function _List_toArray(xs)
-{
-	for (var out = []; xs.b; xs = xs.b) // WHILE_CONS
-	{
-		out.push(xs.a);
-	}
-	return out;
-}
-
-var _List_map2 = F3(function(f, xs, ys)
-{
-	for (var arr = []; xs.b && ys.b; xs = xs.b, ys = ys.b) // WHILE_CONSES
-	{
-		arr.push(A2(f, xs.a, ys.a));
-	}
-	return _List_fromArray(arr);
-});
-
-var _List_map3 = F4(function(f, xs, ys, zs)
-{
-	for (var arr = []; xs.b && ys.b && zs.b; xs = xs.b, ys = ys.b, zs = zs.b) // WHILE_CONSES
-	{
-		arr.push(A3(f, xs.a, ys.a, zs.a));
-	}
-	return _List_fromArray(arr);
-});
-
-var _List_map4 = F5(function(f, ws, xs, ys, zs)
-{
-	for (var arr = []; ws.b && xs.b && ys.b && zs.b; ws = ws.b, xs = xs.b, ys = ys.b, zs = zs.b) // WHILE_CONSES
-	{
-		arr.push(A4(f, ws.a, xs.a, ys.a, zs.a));
-	}
-	return _List_fromArray(arr);
-});
-
-var _List_map5 = F6(function(f, vs, ws, xs, ys, zs)
-{
-	for (var arr = []; vs.b && ws.b && xs.b && ys.b && zs.b; vs = vs.b, ws = ws.b, xs = xs.b, ys = ys.b, zs = zs.b) // WHILE_CONSES
-	{
-		arr.push(A5(f, vs.a, ws.a, xs.a, ys.a, zs.a));
-	}
-	return _List_fromArray(arr);
-});
-
-var _List_sortBy = F2(function(f, xs)
-{
-	return _List_fromArray(_List_toArray(xs).sort(function(a, b) {
-		return _Utils_cmp(f(a), f(b));
-	}));
-});
-
-var _List_sortWith = F2(function(f, xs)
-{
-	return _List_fromArray(_List_toArray(xs).sort(function(a, b) {
-		var ord = A2(f, a, b);
-		return ord === $elm$core$Basics$EQ ? 0 : ord === $elm$core$Basics$LT ? -1 : 1;
-	}));
-});
 
 
 
@@ -4570,37 +4570,194 @@ function _Url_percentDecode(string)
 	{
 		return $elm$core$Maybe$Nothing;
 	}
-}var $author$project$Main$UrlChanged = function (a) {
+}
+
+
+// DECODER
+
+var _File_decoder = _Json_decodePrim(function(value) {
+	// NOTE: checks if `File` exists in case this is run on node
+	return (typeof File !== 'undefined' && value instanceof File)
+		? $elm$core$Result$Ok(value)
+		: _Json_expecting('a FILE', value);
+});
+
+
+// METADATA
+
+function _File_name(file) { return file.name; }
+function _File_mime(file) { return file.type; }
+function _File_size(file) { return file.size; }
+
+function _File_lastModified(file)
+{
+	return $elm$time$Time$millisToPosix(file.lastModified);
+}
+
+
+// DOWNLOAD
+
+var _File_downloadNode;
+
+function _File_getDownloadNode()
+{
+	return _File_downloadNode || (_File_downloadNode = document.createElement('a'));
+}
+
+var _File_download = F3(function(name, mime, content)
+{
+	return _Scheduler_binding(function(callback)
+	{
+		var blob = new Blob([content], {type: mime});
+
+		// for IE10+
+		if (navigator.msSaveOrOpenBlob)
+		{
+			navigator.msSaveOrOpenBlob(blob, name);
+			return;
+		}
+
+		// for HTML5
+		var node = _File_getDownloadNode();
+		var objectUrl = URL.createObjectURL(blob);
+		node.href = objectUrl;
+		node.download = name;
+		_File_click(node);
+		URL.revokeObjectURL(objectUrl);
+	});
+});
+
+function _File_downloadUrl(href)
+{
+	return _Scheduler_binding(function(callback)
+	{
+		var node = _File_getDownloadNode();
+		node.href = href;
+		node.download = '';
+		node.origin === location.origin || (node.target = '_blank');
+		_File_click(node);
+	});
+}
+
+
+// IE COMPATIBILITY
+
+function _File_makeBytesSafeForInternetExplorer(bytes)
+{
+	// only needed by IE10 and IE11 to fix https://github.com/elm/file/issues/10
+	// all other browsers can just run `new Blob([bytes])` directly with no problem
+	//
+	return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+function _File_click(node)
+{
+	// only needed by IE10 and IE11 to fix https://github.com/elm/file/issues/11
+	// all other browsers have MouseEvent and do not need this conditional stuff
+	//
+	if (typeof MouseEvent === 'function')
+	{
+		node.dispatchEvent(new MouseEvent('click'));
+	}
+	else
+	{
+		var event = document.createEvent('MouseEvents');
+		event.initMouseEvent('click', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
+		document.body.appendChild(node);
+		node.dispatchEvent(event);
+		document.body.removeChild(node);
+	}
+}
+
+
+// UPLOAD
+
+var _File_node;
+
+function _File_uploadOne(mimes)
+{
+	return _Scheduler_binding(function(callback)
+	{
+		_File_node = document.createElement('input');
+		_File_node.type = 'file';
+		_File_node.accept = A2($elm$core$String$join, ',', mimes);
+		_File_node.addEventListener('change', function(event)
+		{
+			callback(_Scheduler_succeed(event.target.files[0]));
+		});
+		_File_click(_File_node);
+	});
+}
+
+function _File_uploadOneOrMore(mimes)
+{
+	return _Scheduler_binding(function(callback)
+	{
+		_File_node = document.createElement('input');
+		_File_node.type = 'file';
+		_File_node.multiple = true;
+		_File_node.accept = A2($elm$core$String$join, ',', mimes);
+		_File_node.addEventListener('change', function(event)
+		{
+			var elmFiles = _List_fromArray(event.target.files);
+			callback(_Scheduler_succeed(_Utils_Tuple2(elmFiles.a, elmFiles.b)));
+		});
+		_File_click(_File_node);
+	});
+}
+
+
+// CONTENT
+
+function _File_toString(blob)
+{
+	return _Scheduler_binding(function(callback)
+	{
+		var reader = new FileReader();
+		reader.addEventListener('loadend', function() {
+			callback(_Scheduler_succeed(reader.result));
+		});
+		reader.readAsText(blob);
+		return function() { reader.abort(); };
+	});
+}
+
+function _File_toBytes(blob)
+{
+	return _Scheduler_binding(function(callback)
+	{
+		var reader = new FileReader();
+		reader.addEventListener('loadend', function() {
+			callback(_Scheduler_succeed(new DataView(reader.result)));
+		});
+		reader.readAsArrayBuffer(blob);
+		return function() { reader.abort(); };
+	});
+}
+
+function _File_toUrl(blob)
+{
+	return _Scheduler_binding(function(callback)
+	{
+		var reader = new FileReader();
+		reader.addEventListener('loadend', function() {
+			callback(_Scheduler_succeed(reader.result));
+		});
+		reader.readAsDataURL(blob);
+		return function() { reader.abort(); };
+	});
+}
+
+var $author$project$Main$UrlChanged = function (a) {
 	return {$: 'UrlChanged', a: a};
 };
 var $author$project$Main$UrlRequested = function (a) {
 	return {$: 'UrlRequested', a: a};
 };
+var $elm$core$Basics$EQ = {$: 'EQ'};
+var $elm$core$Basics$GT = {$: 'GT'};
+var $elm$core$Basics$LT = {$: 'LT'};
 var $elm$core$List$cons = _List_cons;
-var $elm$core$Elm$JsArray$foldr = _JsArray_foldr;
-var $elm$core$Array$foldr = F3(
-	function (func, baseCase, _v0) {
-		var tree = _v0.c;
-		var tail = _v0.d;
-		var helper = F2(
-			function (node, acc) {
-				if (node.$ === 'SubTree') {
-					var subTree = node.a;
-					return A3($elm$core$Elm$JsArray$foldr, helper, acc, subTree);
-				} else {
-					var values = node.a;
-					return A3($elm$core$Elm$JsArray$foldr, func, acc, values);
-				}
-			});
-		return A3(
-			$elm$core$Elm$JsArray$foldr,
-			helper,
-			A3($elm$core$Elm$JsArray$foldr, func, baseCase, tail),
-			tree);
-	});
-var $elm$core$Array$toList = function (array) {
-	return A3($elm$core$Array$foldr, $elm$core$List$cons, _List_Nil, array);
-};
 var $elm$core$Dict$foldr = F3(
 	function (func, acc, t) {
 		foldr:
@@ -4653,9 +4810,30 @@ var $elm$core$Set$toList = function (_v0) {
 	var dict = _v0.a;
 	return $elm$core$Dict$keys(dict);
 };
-var $elm$core$Basics$EQ = {$: 'EQ'};
-var $elm$core$Basics$GT = {$: 'GT'};
-var $elm$core$Basics$LT = {$: 'LT'};
+var $elm$core$Elm$JsArray$foldr = _JsArray_foldr;
+var $elm$core$Array$foldr = F3(
+	function (func, baseCase, _v0) {
+		var tree = _v0.c;
+		var tail = _v0.d;
+		var helper = F2(
+			function (node, acc) {
+				if (node.$ === 'SubTree') {
+					var subTree = node.a;
+					return A3($elm$core$Elm$JsArray$foldr, helper, acc, subTree);
+				} else {
+					var values = node.a;
+					return A3($elm$core$Elm$JsArray$foldr, func, acc, values);
+				}
+			});
+		return A3(
+			$elm$core$Elm$JsArray$foldr,
+			helper,
+			A3($elm$core$Elm$JsArray$foldr, func, baseCase, tail),
+			tree);
+	});
+var $elm$core$Array$toList = function (array) {
+	return A3($elm$core$Array$foldr, $elm$core$List$cons, _List_Nil, array);
+};
 var $elm$core$Result$Err = function (a) {
 	return {$: 'Err', a: a};
 };
@@ -5051,7 +5229,6 @@ var $elm$core$Result$isOk = function (result) {
 		return false;
 	}
 };
-var $elm$json$Json$Decode$andThen = _Json_andThen;
 var $elm$json$Json$Decode$map = _Json_map1;
 var $elm$json$Json$Decode$map2 = _Json_map2;
 var $elm$json$Json$Decode$succeed = _Json_succeed;
@@ -5366,12 +5543,21 @@ var $elm$core$Task$perform = F2(
 				A2($elm$core$Task$map, toMessage, task)));
 	});
 var $elm$browser$Browser$application = _Browser_application;
-var $elm$json$Json$Decode$field = _Json_decodeField;
 var $author$project$Main$Loading = {$: 'Loading'};
 var $author$project$Main$Loading_ = function (a) {
 	return {$: 'Loading_', a: a};
 };
 var $elm$core$Platform$Cmd$batch = _Platform_batch;
+var $elm$core$Maybe$map = F2(
+	function (f, maybe) {
+		if (maybe.$ === 'Just') {
+			var value = maybe.a;
+			return $elm$core$Maybe$Just(
+				f(value));
+		} else {
+			return $elm$core$Maybe$Nothing;
+		}
+	});
 var $elm$core$Basics$clamp = F3(
 	function (low, high, number) {
 		return (_Utils_cmp(number, low) < 0) ? low : ((_Utils_cmp(number, high) > 0) ? high : number);
@@ -5379,6 +5565,7 @@ var $elm$core$Basics$clamp = F3(
 var $author$project$Main$GotDigest = function (a) {
 	return {$: 'GotDigest', a: a};
 };
+var $elm$json$Json$Decode$field = _Json_decodeField;
 var $elm$json$Json$Decode$int = _Json_decodeInt;
 var $elm$json$Json$Decode$list = _Json_decodeList;
 var $elm$json$Json$Decode$map5 = _Json_map5;
@@ -6045,7 +6232,11 @@ var $author$project$Main$httpErrorToString = function (err) {
 			return str;
 		case 'BadStatus':
 			var _int = err.a;
-			return 'Error: ' + $elm$core$String$fromInt(_int);
+			if (_int === 404) {
+				return 'Nothing found.';
+			} else {
+				return 'Error: ' + $elm$core$String$fromInt(_int);
+			}
 		case 'NetworkError':
 			return 'Network error.';
 		case 'BadUrl':
@@ -6097,16 +6288,6 @@ var $author$project$Main$makePostBody = F3(
 						[
 							_Utils_Tuple2('request', v)
 						])));
-		}
-	});
-var $elm$core$Maybe$map = F2(
-	function (f, maybe) {
-		if (maybe.$ === 'Just') {
-			var value = maybe.a;
-			return $elm$core$Maybe$Just(
-				f(value));
-		} else {
-			return $elm$core$Maybe$Nothing;
 		}
 	});
 var $elm$http$Http$Request = function (a) {
@@ -6323,6 +6504,7 @@ var $author$project$Main$encodePageParams = function (_v0) {
 				$elm$json$Json$Encode$int(limit))
 			]));
 };
+var $elm$json$Json$Decode$map3 = _Json_map3;
 var $author$project$Main$getDigests = F2(
 	function (model, pageParams) {
 		return $elm$http$Http$post(
@@ -6339,23 +6521,32 @@ var $author$project$Main$getDigests = F2(
 					function (res) {
 						if (res.$ === 'Err') {
 							var e = res.a;
-							return $author$project$Main$GotDigests(
-								$elm$core$Result$Err(
-									$author$project$Main$httpErrorToString(e)));
+							if ((e.$ === 'BadStatus') && (e.a === 404)) {
+								return $author$project$Main$GotDigests(
+									$elm$core$Result$Err('No digest here. Maybe try adding feeds / refreshing feeds?'));
+							} else {
+								return $author$project$Main$GotDigests(
+									$elm$core$Result$Err(
+										$author$project$Main$httpErrorToString(e)));
+							}
 						} else {
 							var f = res.a;
 							return $author$project$Main$GotDigests(
 								$elm$core$Result$Ok(f));
 						}
 					},
-					A3(
-						$elm$json$Json$Decode$map2,
-						F2(
-							function (a, b) {
-								return _Utils_Tuple2(a, b);
+					A4(
+						$elm$json$Json$Decode$map3,
+						F3(
+							function (a, b, c) {
+								return _Utils_Tuple3(a, b, c);
 							}),
-						$elm$json$Json$Decode$list($elm$json$Json$Decode$string),
-						$elm$json$Json$Decode$succeed(pageParams))),
+						A2(
+							$elm$json$Json$Decode$field,
+							'digests',
+							$elm$json$Json$Decode$list($elm$json$Json$Decode$string)),
+						$elm$json$Json$Decode$succeed(pageParams),
+						A2($elm$json$Json$Decode$field, 'total', $elm$json$Json$Decode$int))),
 				url: model.apiEndpoint
 			});
 	});
@@ -6366,7 +6557,6 @@ var $author$project$Main$Feed = F3(
 	function (id, url, title) {
 		return {id: id, title: title, url: url};
 	});
-var $elm$json$Json$Decode$map3 = _Json_map3;
 var $author$project$Main$feedDecoder = function () {
 	var url = A2($elm$json$Json$Decode$field, 'url', $elm$json$Json$Decode$string);
 	var title = A2(
@@ -6377,29 +6567,43 @@ var $author$project$Main$feedDecoder = function () {
 	return A4($elm$json$Json$Decode$map3, $author$project$Main$Feed, id, url, title);
 }();
 var $author$project$Main$feedListDecoder = $elm$json$Json$Decode$list($author$project$Main$feedDecoder);
-var $author$project$Main$getFeedsList = function (model) {
-	return $elm$http$Http$post(
-		{
-			body: $elm$http$Http$jsonBody(
-				A3($author$project$Main$makePostBody, 'feeds', 'list', $elm$core$Maybe$Nothing)),
-			expect: A2(
-				$elm$http$Http$expectJson,
-				function (res) {
-					if (res.$ === 'Err') {
-						var e = res.a;
-						return $author$project$Main$GotFeedsList(
-							$elm$core$Result$Err(
-								$author$project$Main$httpErrorToString(e)));
-					} else {
-						var f = res.a;
-						return $author$project$Main$GotFeedsList(
-							$elm$core$Result$Ok(f));
-					}
-				},
-				A2($elm$json$Json$Decode$field, 'feeds', $author$project$Main$feedListDecoder)),
-			url: model.apiEndpoint
-		});
-};
+var $author$project$Main$getFeedsList = F2(
+	function (model, p) {
+		return $elm$http$Http$post(
+			{
+				body: $elm$http$Http$jsonBody(
+					A3(
+						$author$project$Main$makePostBody,
+						'feeds',
+						'list',
+						$elm$core$Maybe$Just(
+							$author$project$Main$encodePageParams(p)))),
+				expect: A2(
+					$elm$http$Http$expectJson,
+					function (res) {
+						if (res.$ === 'Err') {
+							var e = res.a;
+							return $author$project$Main$GotFeedsList(
+								$elm$core$Result$Err(
+									$author$project$Main$httpErrorToString(e)));
+						} else {
+							var f = res.a;
+							return $author$project$Main$GotFeedsList(
+								$elm$core$Result$Ok(f));
+						}
+					},
+					A4(
+						$elm$json$Json$Decode$map3,
+						F3(
+							function (a, b, c) {
+								return _Utils_Tuple3(a, b, c);
+							}),
+						A2($elm$json$Json$Decode$field, 'feeds', $author$project$Main$feedListDecoder),
+						$elm$json$Json$Decode$succeed(p),
+						A2($elm$json$Json$Decode$field, 'total', $elm$json$Json$Decode$int))),
+				url: model.apiEndpoint
+			});
+	});
 var $author$project$Main$getPageParams = function (r) {
 	switch (r.$) {
 		case 'Loading_':
@@ -6426,7 +6630,16 @@ var $author$project$Main$pageCmdsToRun = F2(
 				return $elm$core$Platform$Cmd$batch(
 					_List_fromArray(
 						[
-							$author$project$Main$getFeedsList(model)
+							A2(
+							$author$project$Main$getFeedsList,
+							model,
+							{
+								limit: A3(
+									$elm$core$Basics$clamp,
+									100,
+									10000,
+									$author$project$Main$getPageParams(model.digests).limit)
+							})
 						]));
 			default:
 				var d = page.a;
@@ -6744,15 +6957,33 @@ var $author$project$Main$parseUrl = function (url) {
 		return $author$project$Main$DashboardPage;
 	}
 };
+var $elm$core$Maybe$withDefault = F2(
+	function (_default, maybe) {
+		if (maybe.$ === 'Just') {
+			var value = maybe.a;
+			return value;
+		} else {
+			return _default;
+		}
+	});
 var $author$project$Main$init = F3(
 	function (_v0, url, key) {
-		var port_ = _v0.port_;
 		var initModel = {
-			apiEndpoint: 'http://localhost:' + (port_ + '/api/v1'),
+			apiEndpoint: (_Utils_eq(url.protocol, $elm$url$Url$Https) ? 'https://' : 'http://') + (url.host + (A2(
+				$elm$core$Maybe$withDefault,
+				'',
+				A2(
+					$elm$core$Maybe$map,
+					function (p) {
+						return ':' + $elm$core$String$fromInt(p);
+					},
+					url.port_)) + '/api/v1')),
 			currPage: $author$project$Main$parseUrl(url),
+			digestSearchTerm: '',
 			digests: $author$project$Main$Loading_(
 				{limit: 10}),
-			feeds: $author$project$Main$Loading,
+			feeds: $author$project$Main$Loading_(
+				{limit: 10}),
 			key: key,
 			latestDigest: $author$project$Main$Loading,
 			url: url
@@ -6768,10 +6999,51 @@ var $author$project$Main$init = F3(
 						$author$project$Main$parseUrl(url))
 					])));
 	});
+var $author$project$Main$GotConfirmResponse = function (a) {
+	return {$: 'GotConfirmResponse', a: a};
+};
+var $author$project$Main$GotPromptResponse = function (a) {
+	return {$: 'GotPromptResponse', a: a};
+};
 var $elm$core$Platform$Sub$batch = _Platform_batch;
-var $elm$core$Platform$Sub$none = $elm$core$Platform$Sub$batch(_List_Nil);
+var $elm$json$Json$Decode$andThen = _Json_andThen;
+var $elm$json$Json$Decode$index = _Json_decodeIndex;
+var $elm$json$Json$Decode$value = _Json_decodeValue;
+var $author$project$Main$getConfirmResponse = _Platform_incomingPort(
+	'getConfirmResponse',
+	A2(
+		$elm$json$Json$Decode$andThen,
+		function (_v0) {
+			return A2(
+				$elm$json$Json$Decode$andThen,
+				function (_v1) {
+					return $elm$json$Json$Decode$succeed(
+						_Utils_Tuple2(_v0, _v1));
+				},
+				A2($elm$json$Json$Decode$index, 1, $elm$json$Json$Decode$value));
+		},
+		A2($elm$json$Json$Decode$index, 0, $elm$json$Json$Decode$string)));
+var $author$project$Main$getPromptResponse = _Platform_incomingPort(
+	'getPromptResponse',
+	A2(
+		$elm$json$Json$Decode$andThen,
+		function (_v0) {
+			return A2(
+				$elm$json$Json$Decode$andThen,
+				function (_v1) {
+					return $elm$json$Json$Decode$succeed(
+						_Utils_Tuple2(_v0, _v1));
+				},
+				A2($elm$json$Json$Decode$index, 1, $elm$json$Json$Decode$string));
+		},
+		A2($elm$json$Json$Decode$index, 0, $elm$json$Json$Decode$string)));
 var $author$project$Main$subscriptions = function (_v0) {
-	return $elm$core$Platform$Sub$none;
+	return $elm$core$Platform$Sub$batch(
+		_List_fromArray(
+			[
+				$author$project$Main$getPromptResponse($author$project$Main$GotPromptResponse),
+				$author$project$Main$getConfirmResponse($author$project$Main$GotConfirmResponse)
+			]));
 };
 var $author$project$Main$Error = function (a) {
 	return {$: 'Error', a: a};
@@ -6780,16 +7052,283 @@ var $author$project$Main$Error_ = F2(
 	function (a, b) {
 		return {$: 'Error_', a: a, b: b};
 	});
+var $author$project$Main$ImportFeeds = function (a) {
+	return {$: 'ImportFeeds', a: a};
+};
 var $author$project$Main$Loaded = function (a) {
 	return {$: 'Loaded', a: a};
 };
-var $author$project$Main$Loaded_ = F2(
-	function (a, b) {
-		return {$: 'Loaded_', a: a, b: b};
+var $author$project$Main$Loaded_ = F3(
+	function (a, b, c) {
+		return {$: 'Loaded_', a: a, b: b, c: c};
+	});
+var $author$project$Main$AddFeedResult = function (a) {
+	return {$: 'AddFeedResult', a: a};
+};
+var $elm$json$Json$Decode$at = F2(
+	function (fields, decoder) {
+		return A3($elm$core$List$foldr, $elm$json$Json$Decode$field, decoder, fields);
+	});
+var $elm$core$Basics$ge = _Utils_ge;
+var $elm$core$String$trim = _String_trim;
+var $author$project$Main$handleRawHttpResponse = F2(
+	function (decoder, response) {
+		var errBodyDecoder = A3(
+			$elm$json$Json$Decode$map2,
+			F2(
+				function (a, b) {
+					return _Utils_Tuple2(a, b);
+				}),
+			A2(
+				$elm$json$Json$Decode$at,
+				_List_fromArray(
+					['error', 'type']),
+				$elm$json$Json$Decode$string),
+			A2(
+				$elm$json$Json$Decode$at,
+				_List_fromArray(
+					['error', 'message']),
+				$elm$json$Json$Decode$string));
+		switch (response.$) {
+			case 'GoodStatus_':
+				var metadata = response.a;
+				var body = response.b;
+				var b = ($elm$core$String$trim(body) === '') ? '{}' : body;
+				var _v1 = A2($elm$json$Json$Decode$decodeString, decoder, b);
+				if (_v1.$ === 'Ok') {
+					var v = _v1.a;
+					return $elm$core$Result$Ok(v);
+				} else {
+					var e = _v1.a;
+					return $elm$core$Result$Err(
+						$elm$json$Json$Decode$errorToString(e));
+				}
+			case 'BadStatus_':
+				var metadata = response.a;
+				var body = response.b;
+				if ((metadata.statusCode >= 400) && (metadata.statusCode < 500)) {
+					var _v2 = A2($elm$json$Json$Decode$decodeString, errBodyDecoder, body);
+					if (_v2.$ === 'Ok') {
+						var _v3 = _v2.a;
+						var type_ = _v3.a;
+						var msg_ = _v3.b;
+						return $elm$core$Result$Err(
+							A2(
+								$elm$core$String$join,
+								': ',
+								_List_fromArray(
+									[type_, msg_])));
+					} else {
+						return $elm$core$Result$Err(
+							A2(
+								$elm$core$String$join,
+								' ',
+								_List_fromArray(
+									[
+										'I got an error status for that:',
+										$elm$core$String$fromInt(metadata.statusCode),
+										metadata.statusText
+									])));
+					}
+				} else {
+					return $elm$core$Result$Err(
+						A2(
+							$elm$core$String$join,
+							' ',
+							_List_fromArray(
+								[
+									'I got an error status for that:',
+									$elm$core$String$fromInt(metadata.statusCode),
+									metadata.statusText
+								])));
+				}
+			case 'BadUrl_':
+				var string = response.a;
+				return $elm$core$Result$Err(
+					A2(
+						$elm$core$String$join,
+						' ',
+						_List_fromArray(
+							['I think the requested URI is invalid or malformed.', 'We tried to call:', string])));
+			case 'NetworkError_':
+				return $elm$core$Result$Err('Uh oh, there was some network issue. Try again?');
+			default:
+				return $elm$core$Result$Err('The server has taken too long to process this.');
+		}
+	});
+var $elm$json$Json$Encode$list = F2(
+	function (func, entries) {
+		return _Json_wrap(
+			A3(
+				$elm$core$List$foldl,
+				_Json_addEntry(func),
+				_Json_emptyArray(_Utils_Tuple0),
+				entries));
+	});
+var $author$project$Main$addFeed = F2(
+	function (model, url) {
+		return $elm$http$Http$post(
+			{
+				body: $elm$http$Http$jsonBody(
+					A3(
+						$author$project$Main$makePostBody,
+						'feeds',
+						'add',
+						$elm$core$Maybe$Just(
+							$elm$json$Json$Encode$object(
+								_List_fromArray(
+									[
+										_Utils_Tuple2(
+										'urls',
+										A2(
+											$elm$json$Json$Encode$list,
+											$elm$json$Json$Encode$string,
+											_List_fromArray(
+												[url])))
+									]))))),
+				expect: A2(
+					$elm$http$Http$expectStringResponse,
+					$author$project$Main$AddFeedResult,
+					$author$project$Main$handleRawHttpResponse(
+						$elm$json$Json$Decode$succeed(_Utils_Tuple0))),
+				url: model.apiEndpoint
+			});
+	});
+var $elm$core$Basics$composeL = F3(
+	function (g, f, x) {
+		return g(
+			f(x));
+	});
+var $elm$core$Task$onError = _Scheduler_onError;
+var $elm$core$Task$attempt = F2(
+	function (resultToMessage, task) {
+		return $elm$core$Task$command(
+			$elm$core$Task$Perform(
+				A2(
+					$elm$core$Task$onError,
+					A2(
+						$elm$core$Basics$composeL,
+						A2($elm$core$Basics$composeL, $elm$core$Task$succeed, resultToMessage),
+						$elm$core$Result$Err),
+					A2(
+						$elm$core$Task$andThen,
+						A2(
+							$elm$core$Basics$composeL,
+							A2($elm$core$Basics$composeL, $elm$core$Task$succeed, resultToMessage),
+							$elm$core$Result$Ok),
+						task))));
+	});
+var $elm$json$Json$Decode$decodeValue = _Json_run;
+var $author$project$Main$GetFeeds = function (a) {
+	return {$: 'GetFeeds', a: a};
+};
+var $author$project$Main$ShowAlert = function (a) {
+	return {$: 'ShowAlert', a: a};
+};
+var $author$project$Main$deleteFeed = F2(
+	function (model, feedUrl) {
+		return $elm$http$Http$post(
+			{
+				body: $elm$http$Http$jsonBody(
+					A3(
+						$author$project$Main$makePostBody,
+						'feeds',
+						'remove',
+						$elm$core$Maybe$Just(
+							$elm$json$Json$Encode$string(feedUrl)))),
+				expect: A2(
+					$elm$http$Http$expectStringResponse,
+					function (res) {
+						if (res.$ === 'Err') {
+							var e = res.a;
+							return $author$project$Main$ShowAlert(e);
+						} else {
+							return $author$project$Main$GetFeeds(
+								$author$project$Main$getPageParams(model.feeds));
+						}
+					},
+					$author$project$Main$handleRawHttpResponse(
+						$elm$json$Json$Decode$succeed(_Utils_Tuple0))),
+				url: model.apiEndpoint
+			});
 	});
 var $elm$browser$Browser$Navigation$load = _Browser_load;
+var $elm$core$Debug$log = _Debug_log;
+var $elm$core$Task$fail = _Scheduler_fail;
+var $elm$core$Task$mapError = F2(
+	function (convert, task) {
+		return A2(
+			$elm$core$Task$onError,
+			A2($elm$core$Basics$composeL, $elm$core$Task$fail, convert),
+			task);
+	});
 var $elm$core$Platform$Cmd$none = $elm$core$Platform$Cmd$batch(_List_Nil);
 var $elm$browser$Browser$Navigation$pushUrl = _Browser_pushUrl;
+var $author$project$Main$NoOp = {$: 'NoOp'};
+var $elm$http$Http$expectBytesResponse = F2(
+	function (toMsg, toResult) {
+		return A3(
+			_Http_expect,
+			'arraybuffer',
+			_Http_toDataView,
+			A2($elm$core$Basics$composeR, toResult, toMsg));
+	});
+var $elm$http$Http$expectWhatever = function (toMsg) {
+	return A2(
+		$elm$http$Http$expectBytesResponse,
+		toMsg,
+		$elm$http$Http$resolve(
+			function (_v0) {
+				return $elm$core$Result$Ok(_Utils_Tuple0);
+			}));
+};
+var $author$project$Main$refreshFeed = function (model) {
+	return $elm$http$Http$post(
+		{
+			body: $elm$http$Http$jsonBody(
+				A3($author$project$Main$makePostBody, 'feeds', 'refresh', $elm$core$Maybe$Nothing)),
+			expect: $elm$http$Http$expectWhatever(
+				function (_v0) {
+					return $author$project$Main$NoOp;
+				}),
+			url: model.apiEndpoint
+		});
+};
+var $author$project$Main$showAlert = _Platform_outgoingPort('showAlert', $elm$json$Json$Encode$string);
+var $author$project$Main$showConfirm = _Platform_outgoingPort(
+	'showConfirm',
+	function ($) {
+		var a = $.a;
+		var b = $.b;
+		return A2(
+			$elm$json$Json$Encode$list,
+			$elm$core$Basics$identity,
+			_List_fromArray(
+				[
+					$elm$json$Json$Encode$string(a),
+					$elm$core$Basics$identity(b)
+				]));
+	});
+var $author$project$Main$showPrompt = _Platform_outgoingPort(
+	'showPrompt',
+	function ($) {
+		var a = $.a;
+		var b = $.b;
+		return A2(
+			$elm$json$Json$Encode$list,
+			$elm$core$Basics$identity,
+			_List_fromArray(
+				[
+					$elm$json$Json$Encode$string(a),
+					$elm$core$Basics$identity(b)
+				]));
+	});
+var $elm$core$Debug$toString = _Debug_toString;
+var $elm$time$Time$Posix = function (a) {
+	return {$: 'Posix', a: a};
+};
+var $elm$time$Time$millisToPosix = $elm$time$Time$Posix;
+var $elm$file$File$toString = _File_toString;
 var $elm$url$Url$addPort = F2(
 	function (maybePort, starter) {
 		if (maybePort.$ === 'Nothing') {
@@ -6834,9 +7373,99 @@ var $elm$url$Url$toString = function (url) {
 					_Utils_ap(http, url.host)),
 				url.path)));
 };
+var $author$project$Main$UploadedOpmlFile = function (a) {
+	return {$: 'UploadedOpmlFile', a: a};
+};
+var $elm$file$File$Select$file = F2(
+	function (mimes, toMsg) {
+		return A2(
+			$elm$core$Task$perform,
+			toMsg,
+			_File_uploadOne(mimes));
+	});
+var $author$project$Main$triggerFileUpload = A2($elm$file$File$Select$file, _List_Nil, $author$project$Main$UploadedOpmlFile);
 var $author$project$Main$update = F2(
 	function (msg, model) {
 		switch (msg.$) {
+			case 'NoOp':
+				return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
+			case 'GotConfirmResponse':
+				var _v1 = msg.a;
+				var key = _v1.a;
+				var value = _v1.b;
+				var _v2 = _Utils_Tuple2(key, value);
+				if (_v2.a === 'deleteFeed') {
+					var url = _v2.b;
+					var id_ = A2($elm$json$Json$Decode$decodeValue, $elm$json$Json$Decode$string, url);
+					if (id_.$ === 'Ok') {
+						var v = id_.a;
+						return _Utils_Tuple2(
+							model,
+							A2($author$project$Main$deleteFeed, model, v));
+					} else {
+						return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
+					}
+				} else {
+					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
+				}
+			case 'GotPromptResponse':
+				var _v4 = msg.a;
+				var key = _v4.a;
+				var value = _v4.b;
+				var _v5 = A2(
+					$elm$core$Debug$log,
+					'kv',
+					_Utils_Tuple2(key, value));
+				if (key === 'addFeed') {
+					return _Utils_Tuple2(
+						model,
+						A2($author$project$Main$addFeed, model, value));
+				} else {
+					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
+				}
+			case 'AddFeedResult':
+				var res = msg.a;
+				if (res.$ === 'Ok') {
+					return _Utils_Tuple2(
+						model,
+						A2(
+							$author$project$Main$getFeedsList,
+							model,
+							$author$project$Main$getPageParams(model.feeds)));
+				} else {
+					var e = res.a;
+					return _Utils_Tuple2(
+						model,
+						$author$project$Main$showAlert(e));
+				}
+			case 'TriggerFileUpload':
+				return _Utils_Tuple2(model, $author$project$Main$triggerFileUpload);
+			case 'UploadedOpmlFile':
+				var file = msg.a;
+				var _v8 = A2($elm$core$Debug$log, 'called', '');
+				var _v9 = A2($elm$core$Debug$log, 'file', file);
+				return _Utils_Tuple2(
+					model,
+					A2(
+						$elm$core$Task$attempt,
+						$author$project$Main$ImportFeeds,
+						A2(
+							$elm$core$Task$mapError,
+							$elm$core$Debug$toString,
+							$elm$file$File$toString(file))));
+			case 'ImportFeeds':
+				var opml = msg.a;
+				var _v10 = A2($elm$core$Debug$log, 'opml', opml);
+				return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
+			case 'RefreshFeed':
+				return _Utils_Tuple2(
+					model,
+					$elm$core$Platform$Cmd$batch(
+						_List_fromArray(
+							[
+								$author$project$Main$refreshFeed(model),
+								$author$project$Main$showAlert('Started refresh in the background. It may take several minutes. Check the terminal (where you started rdigest) for updates.')
+							])));
 			case 'UrlRequested':
 				var urlRequest = msg.a;
 				if (urlRequest.$ === 'Internal') {
@@ -6860,15 +7489,59 @@ var $author$project$Main$update = F2(
 			case 'UrlChanged':
 				var url = msg.a;
 				var page = $author$project$Main$parseUrl(url);
+				var feeds = function () {
+					if (page.$ === 'FeedsPage') {
+						return $author$project$Main$Loading_(
+							$author$project$Main$getPageParams(model.feeds));
+					} else {
+						return model.feeds;
+					}
+				}();
+				var digests = function () {
+					if (page.$ === 'DigestsPage') {
+						return $author$project$Main$Loading_(
+							$author$project$Main$getPageParams(model.digests));
+					} else {
+						return model.digests;
+					}
+				}();
 				var newModel = _Utils_update(
 					model,
 					{
 						currPage: $author$project$Main$parseUrl(url),
+						digests: digests,
+						feeds: feeds,
 						url: url
 					});
 				return _Utils_Tuple2(
 					newModel,
 					A2($author$project$Main$pageCmdsToRun, newModel, page));
+			case 'UpdateDigestSearchTerm':
+				var str = msg.a;
+				return _Utils_Tuple2(
+					_Utils_update(
+						model,
+						{digestSearchTerm: str}),
+					$elm$core$Platform$Cmd$none);
+			case 'ShowPrompt':
+				var prompt = msg.a;
+				var value = msg.b;
+				return _Utils_Tuple2(
+					model,
+					$author$project$Main$showPrompt(
+						_Utils_Tuple2(prompt, value)));
+			case 'ShowConfirm':
+				var prompt = msg.a;
+				var value = msg.b;
+				return _Utils_Tuple2(
+					model,
+					$author$project$Main$showConfirm(
+						_Utils_Tuple2(prompt, value)));
+			case 'ShowAlert':
+				var m = msg.a;
+				return _Utils_Tuple2(
+					model,
+					$author$project$Main$showAlert(m));
 			case 'GotFeedsList':
 				var res = msg.a;
 				if (res.$ === 'Err') {
@@ -6877,16 +7550,22 @@ var $author$project$Main$update = F2(
 						_Utils_update(
 							model,
 							{
-								feeds: $author$project$Main$Error(e)
+								feeds: A2(
+									$author$project$Main$Error_,
+									e,
+									$author$project$Main$getPageParams(model.feeds))
 							}),
 						$elm$core$Platform$Cmd$none);
 				} else {
-					var feeds = res.a;
+					var _v15 = res.a;
+					var feeds = _v15.a;
+					var p = _v15.b;
+					var total = _v15.c;
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
 							{
-								feeds: $author$project$Main$Loaded(feeds)
+								feeds: A3($author$project$Main$Loaded_, feeds, p, total)
 							}),
 						$elm$core$Platform$Cmd$none);
 				}
@@ -6905,14 +7584,15 @@ var $author$project$Main$update = F2(
 							}),
 						$elm$core$Platform$Cmd$none);
 				} else {
-					var _v4 = res.a;
-					var digests = _v4.a;
-					var newPageParams = _v4.b;
+					var _v17 = res.a;
+					var digests = _v17.a;
+					var newPageParams = _v17.b;
+					var total = _v17.c;
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
 							{
-								digests: A2($author$project$Main$Loaded_, digests, newPageParams)
+								digests: A3($author$project$Main$Loaded_, digests, newPageParams, total)
 							}),
 						$elm$core$Platform$Cmd$none);
 				}
@@ -6937,13 +7617,19 @@ var $author$project$Main$update = F2(
 							}),
 						$elm$core$Platform$Cmd$none);
 				}
-			default:
+			case 'GetDigest':
 				var pageParams = msg.a;
 				return _Utils_Tuple2(
 					model,
 					A2($author$project$Main$getDigests, model, pageParams));
+			default:
+				var pageParams = msg.a;
+				return _Utils_Tuple2(
+					model,
+					A2($author$project$Main$getFeedsList, model, pageParams));
 		}
 	});
+var $author$project$Main$RefreshFeed = {$: 'RefreshFeed'};
 var $elm$html$Html$a = _VirtualDom_node('a');
 var $elm$html$Html$Attributes$stringProperty = F2(
 	function (key, string) {
@@ -6962,12 +7648,7 @@ var $elm$html$Html$Attributes$href = function (url) {
 		'href',
 		_VirtualDom_noJavaScriptUri(url));
 };
-var $elm$html$Html$span = _VirtualDom_node('span');
-var $elm$virtual_dom$VirtualDom$text = _VirtualDom_text;
-var $elm$html$Html$text = $elm$virtual_dom$VirtualDom$text;
-var $author$project$Main$GetDigest = function (a) {
-	return {$: 'GetDigest', a: a};
-};
+var $elm$html$Html$Attributes$id = $elm$html$Html$Attributes$stringProperty('id');
 var $elm$virtual_dom$VirtualDom$Normal = function (a) {
 	return {$: 'Normal', a: a};
 };
@@ -6984,6 +7665,12 @@ var $elm$html$Html$Events$onClick = function (msg) {
 		$elm$html$Html$Events$on,
 		'click',
 		$elm$json$Json$Decode$succeed(msg));
+};
+var $elm$html$Html$span = _VirtualDom_node('span');
+var $elm$virtual_dom$VirtualDom$text = _VirtualDom_text;
+var $elm$html$Html$text = $elm$virtual_dom$VirtualDom$text;
+var $author$project$Main$GetDigest = function (a) {
+	return {$: 'GetDigest', a: a};
 };
 var $author$project$Main$toMonthString = function (m) {
 	switch (m) {
@@ -7029,9 +7716,9 @@ var $author$project$Main$toFriendlyDate = function (dateString) {
 			_List_fromArray(
 				[
 					date,
-					', ',
-					$author$project$Main$toMonthString(month),
 					' ',
+					$author$project$Main$toMonthString(month),
+					', ',
 					year
 				]));
 	} else {
@@ -7061,11 +7748,12 @@ var $author$project$Main$viewDigestsList = function (model) {
 		default:
 			var ls = _v0.a;
 			var limit = _v0.b.limit;
-			return A2(
+			var total = _v0.c;
+			return ($elm$core$List$length(ls) > 0) ? A2(
 				$elm$html$Html$div,
 				_List_fromArray(
 					[
-						$elm$html$Html$Attributes$class('flex flex-col gap-y-2')
+						$elm$html$Html$Attributes$class('flex flex-col gap-y-3')
 					]),
 				_Utils_ap(
 					A2(
@@ -7075,7 +7763,7 @@ var $author$project$Main$viewDigestsList = function (model) {
 								$elm$html$Html$a,
 								_List_fromArray(
 									[
-										$elm$html$Html$Attributes$class('inline-flex'),
+										$elm$html$Html$Attributes$class('border border-slate-200 rounded-lg p-3'),
 										$elm$html$Html$Attributes$href(
 										A2(
 											$elm$core$String$join,
@@ -7096,27 +7784,309 @@ var $author$project$Main$viewDigestsList = function (model) {
 							$elm$html$Html$span,
 							_List_fromArray(
 								[
-									$elm$html$Html$Attributes$class('text-blue-600 cursor-pointer'),
+									$elm$html$Html$Attributes$class(
+									A2(
+										$elm$core$String$join,
+										' ',
+										_List_fromArray(
+											[
+												'text-blue-600 cursor-pointer',
+												(_Utils_cmp(limit, total) > -1) ? 'hidden' : ''
+											]))),
 									$elm$html$Html$Events$onClick(
 									$author$project$Main$GetDigest(
-										{limit: limit + 10}))
+										{limit: limit + 10000}))
 								]),
 							_List_fromArray(
 								[
 									$elm$html$Html$text('Load more...')
 								]))
-						])));
+						]))) : A2(
+				$elm$html$Html$div,
+				_List_fromArray(
+					[
+						$elm$html$Html$Attributes$class('opacity-60')
+					]),
+				_List_fromArray(
+					[
+						$elm$html$Html$text('No digests yet. Try refreshing the feeds?')
+					]));
 	}
 };
-var $elm$core$Maybe$withDefault = F2(
-	function (_default, maybe) {
-		if (maybe.$ === 'Just') {
-			var value = maybe.a;
-			return value;
-		} else {
-			return _default;
+var $author$project$Main$ShowConfirm = F2(
+	function (a, b) {
+		return {$: 'ShowConfirm', a: a, b: b};
+	});
+var $author$project$Main$ShowPrompt = F2(
+	function (a, b) {
+		return {$: 'ShowPrompt', a: a, b: b};
+	});
+var $author$project$Main$TriggerFileUpload = {$: 'TriggerFileUpload'};
+var $elm$html$Html$button = _VirtualDom_node('button');
+var $author$project$Main$viewFeedsList = function (model) {
+	var _v0 = model.feeds;
+	switch (_v0.$) {
+		case 'Loading_':
+			return A2(
+				$elm$html$Html$div,
+				_List_Nil,
+				_List_fromArray(
+					[
+						$elm$html$Html$text('Loading feeds...')
+					]));
+		case 'Error_':
+			var e = _v0.a;
+			var p = _v0.b;
+			return A2(
+				$elm$html$Html$div,
+				_List_Nil,
+				_List_fromArray(
+					[
+						$elm$html$Html$text(e)
+					]));
+		default:
+			var feeds = _v0.a;
+			var p = _v0.b;
+			var total = _v0.c;
+			var noFeeds = !$elm$core$List$length(feeds);
+			return A2(
+				$elm$html$Html$div,
+				_List_fromArray(
+					[
+						$elm$html$Html$Attributes$class('flex flex-col gap-y-3')
+					]),
+				_List_fromArray(
+					[
+						A2(
+						$elm$html$Html$div,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$class('flex gap-x-3')
+							]),
+						_List_fromArray(
+							[
+								A2(
+								$elm$html$Html$button,
+								_List_fromArray(
+									[
+										$elm$html$Html$Events$onClick(
+										A2(
+											$author$project$Main$ShowPrompt,
+											'Enter feed URL:',
+											$elm$json$Json$Encode$object(
+												_List_fromArray(
+													[
+														_Utils_Tuple2(
+														'key',
+														$elm$json$Json$Encode$string('addFeed')),
+														_Utils_Tuple2(
+														'defaultValue',
+														$elm$json$Json$Encode$string(''))
+													])))),
+										$elm$html$Html$Attributes$class('')
+									]),
+								_List_fromArray(
+									[
+										$elm$html$Html$text('+ Add RSS feed')
+									])),
+								A2(
+								$elm$html$Html$button,
+								_List_fromArray(
+									[
+										$elm$html$Html$Events$onClick($author$project$Main$TriggerFileUpload),
+										$elm$html$Html$Attributes$class('')
+									]),
+								_List_fromArray(
+									[
+										$elm$html$Html$text('+ Import OPML')
+									]))
+							])),
+						A2(
+						$elm$html$Html$div,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$class(
+								'opacity-60 mt-6 ' + (noFeeds ? 'hidden' : ''))
+							]),
+						_List_fromArray(
+							[
+								$elm$html$Html$text(
+								A2(
+									$elm$core$String$join,
+									'',
+									_List_fromArray(
+										[
+											'Total: ',
+											$elm$core$String$fromInt(total),
+											' feeds.'
+										])))
+							])),
+						A2(
+						$elm$html$Html$div,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$class(
+								'pt-6 flex flex-col gap-y-3 ' + (noFeeds ? 'hidden' : ''))
+							]),
+						A2(
+							$elm$core$List$map,
+							function (f) {
+								return A2(
+									$elm$html$Html$div,
+									_List_fromArray(
+										[
+											$elm$html$Html$Attributes$class('border rounded-lg border-slate-200 p-3 flex gap-x-4 items-center items-start justify-between')
+										]),
+									_List_fromArray(
+										[
+											A2(
+											$elm$html$Html$span,
+											_List_fromArray(
+												[
+													$elm$html$Html$Attributes$class('font-semibold')
+												]),
+											_List_fromArray(
+												[
+													$elm$html$Html$text(
+													A2($elm$core$Maybe$withDefault, f.url, f.title))
+												])),
+											A2(
+											$elm$html$Html$span,
+											_List_fromArray(
+												[
+													$elm$html$Html$Attributes$class('flex items-center gap-x-2')
+												]),
+											_List_fromArray(
+												[
+													A2(
+													$elm$html$Html$span,
+													_List_fromArray(
+														[
+															$elm$html$Html$Attributes$class('hidden cursor-pointer text-xs text-blue-600'),
+															$elm$html$Html$Events$onClick(
+															A2(
+																$author$project$Main$ShowPrompt,
+																'Change title to:',
+																$elm$json$Json$Encode$string(
+																	A2($elm$core$Maybe$withDefault, f.url, f.title))))
+														]),
+													_List_fromArray(
+														[
+															$elm$html$Html$text('Edit name')
+														])),
+													A2(
+													$elm$html$Html$span,
+													_List_fromArray(
+														[
+															$elm$html$Html$Attributes$class('hidden')
+														]),
+													_List_fromArray(
+														[
+															$elm$html$Html$text('•')
+														])),
+													A2(
+													$elm$html$Html$span,
+													_List_fromArray(
+														[
+															$elm$html$Html$Attributes$class('cursor-pointer text-xs text-red-500'),
+															$elm$html$Html$Events$onClick(
+															A2(
+																$author$project$Main$ShowConfirm,
+																'Sure? This will delete the feed and the links from it. You can\'t undo it.',
+																$elm$json$Json$Encode$object(
+																	_List_fromArray(
+																		[
+																			_Utils_Tuple2(
+																			'key',
+																			$elm$json$Json$Encode$string('deleteFeed')),
+																			_Utils_Tuple2(
+																			'value',
+																			$elm$json$Json$Encode$string(f.url))
+																		]))))
+														]),
+													_List_fromArray(
+														[
+															$elm$html$Html$text('Delete')
+														]))
+												]))
+										]));
+							},
+							feeds)),
+						A2(
+						$elm$html$Html$div,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$class(
+								(!$elm$core$List$length(feeds)) ? 'opacity-60' : 'hidden')
+							]),
+						_List_fromArray(
+							[
+								$elm$html$Html$text('You don\'t have any feeds. Try adding a feed or importing from an OPML file?')
+							])),
+						A2(
+						$elm$html$Html$span,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$class(
+								A2(
+									$elm$core$String$join,
+									' ',
+									_List_fromArray(
+										[
+											'text-blue-600 cursor-pointer',
+											(_Utils_cmp(p.limit, total) > -1) ? 'hidden' : ''
+										]))),
+								$elm$html$Html$Events$onClick(
+								$author$project$Main$GetFeeds(
+									{limit: p.limit + 100}))
+							]),
+						_List_fromArray(
+							[
+								$elm$html$Html$text('Load more...')
+							]))
+					]));
+	}
+};
+var $author$project$Main$Digest = F2(
+	function (date, links) {
+		return {date: date, links: links};
+	});
+var $elm$core$List$any = F2(
+	function (isOkay, list) {
+		any:
+		while (true) {
+			if (!list.b) {
+				return false;
+			} else {
+				var x = list.a;
+				var xs = list.b;
+				if (isOkay(x)) {
+					return true;
+				} else {
+					var $temp$isOkay = isOkay,
+						$temp$list = xs;
+					isOkay = $temp$isOkay;
+					list = $temp$list;
+					continue any;
+				}
+			}
 		}
 	});
+var $elm$core$List$filter = F2(
+	function (isGood, list) {
+		return A3(
+			$elm$core$List$foldr,
+			F2(
+				function (x, xs) {
+					return isGood(x) ? A2($elm$core$List$cons, x, xs) : xs;
+				}),
+			_List_Nil,
+			list);
+	});
+var $elm$core$String$toLower = _String_toLower;
+var $author$project$Main$UpdateDigestSearchTerm = function (a) {
+	return {$: 'UpdateDigestSearchTerm', a: a};
+};
 var $author$project$Main$groupDigestLinksByFeedUrl = function () {
 	var go = F2(
 		function (dict, links) {
@@ -7157,12 +8127,42 @@ var $author$project$Main$groupDigestLinksByFeedUrl = function () {
 	return go($elm$core$Dict$empty);
 }();
 var $elm$html$Html$h3 = _VirtualDom_node('h3');
-var $elm$html$Html$details = _VirtualDom_node('details');
+var $elm$html$Html$input = _VirtualDom_node('input');
+var $elm$html$Html$Events$alwaysStop = function (x) {
+	return _Utils_Tuple2(x, true);
+};
+var $elm$virtual_dom$VirtualDom$MayStopPropagation = function (a) {
+	return {$: 'MayStopPropagation', a: a};
+};
+var $elm$html$Html$Events$stopPropagationOn = F2(
+	function (event, decoder) {
+		return A2(
+			$elm$virtual_dom$VirtualDom$on,
+			event,
+			$elm$virtual_dom$VirtualDom$MayStopPropagation(decoder));
+	});
+var $elm$html$Html$Events$targetValue = A2(
+	$elm$json$Json$Decode$at,
+	_List_fromArray(
+		['target', 'value']),
+	$elm$json$Json$Decode$string);
+var $elm$html$Html$Events$onInput = function (tagger) {
+	return A2(
+		$elm$html$Html$Events$stopPropagationOn,
+		'input',
+		A2(
+			$elm$json$Json$Decode$map,
+			$elm$html$Html$Events$alwaysStop,
+			A2($elm$json$Json$Decode$map, tagger, $elm$html$Html$Events$targetValue)));
+};
+var $elm$html$Html$Attributes$placeholder = $elm$html$Html$Attributes$stringProperty('placeholder');
+var $elm$core$List$sortBy = _List_sortBy;
 var $elm$core$Tuple$second = function (_v0) {
 	var y = _v0.b;
 	return y;
 };
-var $elm$html$Html$summary = _VirtualDom_node('summary');
+var $elm$html$Html$ul = _VirtualDom_node('ul');
+var $elm$html$Html$li = _VirtualDom_node('li');
 var $author$project$Main$showUrl = function (url) {
 	var parsed = $elm$url$Url$fromString(url);
 	if (parsed.$ === 'Nothing') {
@@ -7174,71 +8174,57 @@ var $author$project$Main$showUrl = function (url) {
 			_Utils_ap(
 				u.path,
 				_Utils_ap(
-					A2($elm$core$Maybe$withDefault, '', u.query),
-					A2($elm$core$Maybe$withDefault, '', u.fragment))));
+					A2(
+						$elm$core$Maybe$withDefault,
+						'',
+						A2(
+							$elm$core$Maybe$map,
+							$elm$core$Basics$append('?'),
+							u.query)),
+					A2(
+						$elm$core$Maybe$withDefault,
+						'',
+						A2(
+							$elm$core$Maybe$map,
+							$elm$core$Basics$append('#'),
+							u.fragment)))));
 	}
 };
 var $elm$html$Html$Attributes$target = $elm$html$Html$Attributes$stringProperty('target');
 var $author$project$Main$viewLink = function (_v0) {
 	var link = _v0.link;
 	var title = _v0.title;
-	var feedTitle = _v0.feedTitle;
 	return A2(
-		$elm$html$Html$a,
+		$elm$html$Html$li,
+		_List_Nil,
 		_List_fromArray(
 			[
-				$elm$html$Html$Attributes$href(link),
-				$elm$html$Html$Attributes$target('_blank'),
-				$elm$html$Html$Attributes$class('text-black! flex flex-col gap-y-0.5 p-3 rounded border border-slate-200 cursor-pointer hover:bg-blue-50')
-			]),
-		_List_fromArray(
-			[
-				A2(
-				$elm$html$Html$a,
-				_List_fromArray(
-					[
-						$elm$html$Html$Attributes$href(link),
-						$elm$html$Html$Attributes$target('_blank')
-					]),
-				_List_fromArray(
-					[
-						$elm$html$Html$text(
-						A2($elm$core$Maybe$withDefault, link, title))
-					])),
 				A2(
 				$elm$html$Html$span,
 				_List_fromArray(
 					[
-						$elm$html$Html$Attributes$class('text-xs flex gap-x-2')
+						$elm$html$Html$Attributes$class('flex flex-col gap-y-0.5')
 					]),
 				_List_fromArray(
 					[
 						A2(
-						$elm$html$Html$span,
+						$elm$html$Html$a,
 						_List_fromArray(
 							[
-								$elm$html$Html$Attributes$class(
-								_Utils_eq($elm$core$Maybe$Nothing, feedTitle) ? 'hidden' : '')
+								$elm$html$Html$Attributes$href(link),
+								$elm$html$Html$Attributes$target('_blank')
 							]),
 						_List_fromArray(
 							[
 								$elm$html$Html$text(
-								A2($elm$core$Maybe$withDefault, '', feedTitle))
+								A2($elm$core$Maybe$withDefault, link, title))
 							])),
 						A2(
 						$elm$html$Html$span,
 						_List_fromArray(
 							[
-								$elm$html$Html$Attributes$class(
-								_Utils_eq(feedTitle, $elm$core$Maybe$Nothing) ? 'hidden' : '')
+								$elm$html$Html$Attributes$class('text-xs opacity-70')
 							]),
-						_List_fromArray(
-							[
-								$elm$html$Html$text('•')
-							])),
-						A2(
-						$elm$html$Html$span,
-						_List_Nil,
 						_List_fromArray(
 							[
 								$elm$html$Html$text(
@@ -7252,34 +8238,40 @@ var $author$project$Main$viewLinkGroup = function (_v0) {
 	var links = _v0.b;
 	return A2(
 		$elm$html$Html$div,
-		_List_Nil,
+		_List_fromArray(
+			[
+				$elm$html$Html$Attributes$class('p-4 border rounded border-slate-200')
+			]),
 		_List_fromArray(
 			[
 				A2(
-				$elm$html$Html$details,
-				_List_Nil,
+				$elm$html$Html$h3,
 				_List_fromArray(
 					[
+						$elm$html$Html$Attributes$class('font-bold')
+					]),
+				_List_fromArray(
+					[
+						$elm$html$Html$text(
 						A2(
-						$elm$html$Html$summary,
-						_List_fromArray(
-							[
-								$elm$html$Html$Attributes$class('cursor-pointer')
-							]),
-						_List_fromArray(
-							[
-								$elm$html$Html$text(
-								group.b + ('(' + ($elm$core$String$fromInt(
-									$elm$core$List$length(links)) + ')')))
-							])),
-						A2(
-						$elm$html$Html$div,
-						_List_fromArray(
-							[
-								$elm$html$Html$Attributes$class('mb-6 mt-3 flex flex-col gap-y-2.5')
-							]),
-						A2($elm$core$List$map, $author$project$Main$viewLink, links))
-					]))
+							$elm$core$String$join,
+							'',
+							_List_fromArray(
+								[
+									group.b,
+									' (',
+									$elm$core$String$fromInt(
+									$elm$core$List$length(links)),
+									')'
+								])))
+					])),
+				A2(
+				$elm$html$Html$ul,
+				_List_fromArray(
+					[
+						$elm$html$Html$Attributes$class('mt-3 space-y-4 list-disc list-outside ml-4')
+					]),
+				A2($elm$core$List$map, $author$project$Main$viewLink, links))
 			]));
 };
 var $author$project$Main$viewDigest = function (_v0) {
@@ -7290,7 +8282,7 @@ var $author$project$Main$viewDigest = function (_v0) {
 		$elm$html$Html$div,
 		_List_fromArray(
 			[
-				$elm$html$Html$Attributes$class('flex flex-col gap-y-2')
+				$elm$html$Html$Attributes$class('flex flex-col gap-y-4')
 			]),
 		_List_fromArray(
 			[
@@ -7300,53 +8292,109 @@ var $author$project$Main$viewDigest = function (_v0) {
 				_List_fromArray(
 					[
 						$elm$html$Html$text(
-						$author$project$Main$toFriendlyDate(date))
+						A2(
+							$elm$core$String$join,
+							'',
+							_List_fromArray(
+								[
+									$author$project$Main$toFriendlyDate(date),
+									' ',
+									'(',
+									$elm$core$String$fromInt(
+									$elm$core$List$length(links)),
+									')'
+								])))
 					])),
+				A2(
+				$elm$html$Html$input,
+				_List_fromArray(
+					[
+						$elm$html$Html$Attributes$class('p-2 text-sm border rounded-md border-slate-200 w-full'),
+						$elm$html$Html$Attributes$placeholder('Search in digest...'),
+						$elm$html$Html$Events$onInput($author$project$Main$UpdateDigestSearchTerm)
+					]),
+				_List_Nil),
 				A2(
 				$elm$html$Html$div,
 				_List_fromArray(
 					[
-						$elm$html$Html$Attributes$class('flex flex-col gap-y-1.5')
+						$elm$html$Html$Attributes$class('grid grid-cols-1 lg:grid-cols-3 gap-4')
 					]),
 				A2(
 					$elm$core$List$map,
 					$author$project$Main$viewLinkGroup,
-					$elm$core$Dict$toList(grouped)))
+					$elm$core$List$reverse(
+						A2(
+							$elm$core$List$sortBy,
+							function (_v1) {
+								var ls = _v1.b;
+								return $elm$core$List$length(ls);
+							},
+							$elm$core$Dict$toList(grouped)))))
 			]));
 };
-var $author$project$Main$viewLatestDigest = function (r) {
-	switch (r.$) {
-		case 'Loading':
-			return A2(
-				$elm$html$Html$div,
-				_List_Nil,
-				_List_fromArray(
-					[
-						$elm$html$Html$text('Loading...')
-					]));
-		case 'Error':
-			var e = r.a;
-			return A2(
-				$elm$html$Html$div,
-				_List_Nil,
-				_List_fromArray(
-					[
-						$elm$html$Html$text(e)
-					]));
-		default:
-			var digest = r.a;
-			return A2(
-				$elm$html$Html$div,
-				_List_fromArray(
-					[
-						$elm$html$Html$Attributes$class('flex flex-col gap-y-2.5')
-					]),
-				_List_fromArray(
-					[
-						$author$project$Main$viewDigest(digest)
-					]));
-	}
-};
+var $author$project$Main$viewLatestDigest = F2(
+	function (searchTerm, r) {
+		switch (r.$) {
+			case 'Loading':
+				return A2(
+					$elm$html$Html$div,
+					_List_Nil,
+					_List_fromArray(
+						[
+							$elm$html$Html$text('Loading...')
+						]));
+			case 'Error':
+				var e = r.a;
+				return A2(
+					$elm$html$Html$div,
+					_List_Nil,
+					_List_fromArray(
+						[
+							$elm$html$Html$text(e)
+						]));
+			default:
+				var digest = r.a;
+				var digestFiltered = A2(
+					$author$project$Main$Digest,
+					digest.date,
+					A2(
+						$elm$core$List$filter,
+						function (item) {
+							return (!$elm$core$String$length(
+								$elm$core$String$trim(
+									$elm$core$String$toLower(searchTerm)))) ? true : A2(
+								$elm$core$List$any,
+								function (s) {
+									return A2(
+										$elm$core$String$contains,
+										$elm$core$String$toLower(searchTerm),
+										s);
+								},
+								A2(
+									$elm$core$List$map,
+									$elm$core$String$toLower,
+									_List_fromArray(
+										[
+											item.link,
+											item.feedUrl,
+											A2($elm$core$Maybe$withDefault, item.link, item.title),
+											A2($elm$core$Maybe$withDefault, item.feedUrl, item.feedTitle)
+										])));
+						},
+						digest.links));
+				return A2(
+					$elm$html$Html$div,
+					_List_fromArray(
+						[
+							$elm$html$Html$Attributes$class('flex flex-col gap-y-2.5')
+						]),
+					_List_fromArray(
+						[
+							$author$project$Main$viewDigest(digestFiltered)
+						]));
+		}
+	});
 var $author$project$Main$view = function (model) {
 	var title = function () {
 		var _v2 = model.currPage;
@@ -7366,6 +8414,7 @@ var $author$project$Main$view = function (model) {
 				$elm$html$Html$div,
 				_List_fromArray(
 					[
+						$elm$html$Html$Attributes$id('app'),
 						$elm$html$Html$Attributes$class('flex flex-col gap-y-4')
 					]),
 				_List_fromArray(
@@ -7420,6 +8469,24 @@ var $author$project$Main$view = function (model) {
 								_List_fromArray(
 									[
 										$elm$html$Html$text('View/manage feeds')
+									])),
+								A2(
+								$elm$html$Html$span,
+								_List_Nil,
+								_List_fromArray(
+									[
+										$elm$html$Html$text('•')
+									])),
+								A2(
+								$elm$html$Html$span,
+								_List_fromArray(
+									[
+										$elm$html$Html$Events$onClick($author$project$Main$RefreshFeed),
+										$elm$html$Html$Attributes$class('text-green-500 cursor-pointer')
+									]),
+								_List_fromArray(
+									[
+										$elm$html$Html$text('Refresh feeds')
 									]))
 							])),
 						A2($elm$html$Html$hr, _List_Nil, _List_Nil),
@@ -7432,21 +8499,21 @@ var $author$project$Main$view = function (model) {
 								var _v0 = model.currPage;
 								switch (_v0.$) {
 									case 'DashboardPage':
-										return $author$project$Main$viewLatestDigest(model.latestDigest);
+										return A2($author$project$Main$viewLatestDigest, model.digestSearchTerm, model.latestDigest);
 									case 'FeedsPage':
 										return A2(
 											$elm$html$Html$div,
 											_List_Nil,
 											_List_fromArray(
 												[
-													$elm$html$Html$text('Feeds page TODO')
+													$author$project$Main$viewFeedsList(model)
 												]));
 									default:
 										var d = _v0.a;
 										if (d.$ === 'Nothing') {
 											return $author$project$Main$viewDigestsList(model);
 										} else {
-											return $author$project$Main$viewLatestDigest(model.latestDigest);
+											return A2($author$project$Main$viewLatestDigest, model.digestSearchTerm, model.latestDigest);
 										}
 								}
 							}()
@@ -7459,10 +8526,4 @@ var $author$project$Main$view = function (model) {
 var $author$project$Main$main = $elm$browser$Browser$application(
 	{init: $author$project$Main$init, onUrlChange: $author$project$Main$UrlChanged, onUrlRequest: $author$project$Main$UrlRequested, subscriptions: $author$project$Main$subscriptions, update: $author$project$Main$update, view: $author$project$Main$view});
 _Platform_export({'Main':{'init':$author$project$Main$main(
-	A2(
-		$elm$json$Json$Decode$andThen,
-		function (port_) {
-			return $elm$json$Json$Decode$succeed(
-				{port_: port_});
-		},
-		A2($elm$json$Json$Decode$field, 'port_', $elm$json$Json$Decode$string)))(0)}});}(this));
+	$elm$json$Json$Decode$succeed(_Utils_Tuple0))(0)}});}(this));
