@@ -228,10 +228,6 @@ update msg model =
                     ( model, Cmd.none )
 
         GotPromptResponse ( key, value ) ->
-            let
-                _ =
-                    Debug.log "kv" ( key, value )
-            in
             case key of
                 "addFeed" ->
                     ( model, addFeed model value )
