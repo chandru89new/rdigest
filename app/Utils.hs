@@ -140,6 +140,18 @@ extractBetweenTag tag tags =
       endTag = TagClose tag
    in Prelude.takeWhile (~/= endTag) $ Prelude.dropWhile (~/= startTag) tags
 
+extractXmlUrl :: Tag String -> (Maybe String)
+extractXmlUrl tag =
+  let xs = extractBetweenTag "outline" [tag]
+   in case xs of
+        (h : _) -> (Just $ fromAttrib "xmlUrl" h)
+        _ -> (Nothing)
+
+extractXmlUrlsFromOpmlString :: String -> [Maybe String]
+extractXmlUrlsFromOpmlString c =
+  let tags = Prelude.filter (isTagOpenName "outline") (parseTags c)
+   in Prelude.map extractXmlUrl tags
+
 chunksOf :: Int -> [a] -> [[a]]
 chunksOf _ [] = []
 chunksOf n xs = Prelude.take n xs : Utils.chunksOf n (Prelude.drop n xs)
@@ -169,13 +181,6 @@ parseDate datetime = fmap utctDay $ firstJust $ Prelude.map tryParse [fmt1, fmt2
     go (x : xs_) acc = case x of
       Just y -> Just y
       Nothing -> go xs_ acc
-
--- replaceSmartQuotes :: T.Text -> T.Text
--- replaceSmartQuotes =
---   T.replace (T.pack "“") (T.pack "\"")
---     . T.replace (T.pack "”") (T.pack "\"")
---     . T.replace (T.pack "‘") (T.pack "'")
---     . T.replace (T.pack "’") (T.pack "'")
 
 replaceContent :: String -> String -> String -> String
 replaceContent pattern replaceWith content = unpack $ replace (pack pattern) (pack replaceWith) (pack content)

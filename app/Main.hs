@@ -1,7 +1,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Use section" #-}
@@ -11,24 +10,19 @@
 module Main where
 
 import CLI
-import Control.Monad (forM_, unless)
+import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Trans.Reader (ask)
 import DB
-import qualified Data.ByteString.Char8 as BS
-import Data.FileEmbed
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
 import Data.Pool (withResource)
-import Data.String (IsString (fromString))
 import Data.Version (showVersion)
-import Database.SQLite.Simple (Connection, Only (Only, fromOnly), withTransaction)
 import Paths_rdigest (version)
 import Server (startServer)
 import System.Environment (getArgs)
 import System.IO (hFlush, stdout)
 import Text.Read (readMaybe)
-import Text.StringLike (StringLike (toString))
 import Types
 import Utils
 
@@ -138,23 +132,3 @@ userConfirmation msg = do
   pure $ input == "y" || input == "Y"
 
 -- TEST
-
--- test1 = do
---   pool <- newPool (defaultPoolConfig (open (getDBFile "/Users/chandrashekharv/Documents/projects/rdigest")) close 60.0 10)
---   withResource pool $ \conn -> do
---     applyMigrations conn
-
--- test2 url = do
---   r <- getYtRssFeeds [url]
---   print r
-
--- test3 = do
---   runAppM $ do
---     Config{..} <- ask
---     liftIO $
---       withResource
---         connPool
---         ( \conn -> do
---             res <- getDigests conn (PageParams (Just 2) (Just 0))
---             print res
---         )

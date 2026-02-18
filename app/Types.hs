@@ -2,7 +2,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Use section" #-}
@@ -16,7 +15,6 @@ module Types where
 import Control.Exception
 import Control.Monad.Trans.Reader
 import Data.Aeson
-import Data.Maybe
 import Data.Pool
 import Data.Time
 import Database.SQLite.Simple
@@ -98,8 +96,6 @@ data RpcRequest = RpcRequest
   , reqData :: Maybe Value
   }
 
-data AddFeedReq = AddFeedReq {addFeedUrls :: [String]}
-
 instance Show RpcRequest where
   show (RpcRequest{..}) =
     "Resource: "
@@ -138,9 +134,6 @@ instance FromJSON RpcRequest where
       ( \v ->
           RpcRequest <$> v .: "resource" <*> v .: "action" <*> v .:? "request"
       )
-
-instance FromJSON AddFeedReq where
-  parseJSON = withObject "AddFeedReq" (\v -> AddFeedReq <$> v .: "urls")
 
 data ListFeedsResponse = ListFeedsResponse
   { lfrId :: Int

@@ -14,14 +14,12 @@
 module Server where
 
 import Control.Concurrent
-import Control.Exception (try)
 import Control.Monad (join)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
 import DB
 import Data.Aeson
-import Data.Aeson.Encoding (list)
-import Data.Aeson.Types (parseField, parseFieldMaybe, parseMaybe)
+import Data.Aeson.Types (parseMaybe)
 import Data.ByteString hiding (isSuffixOf, pack)
 import qualified Data.ByteString.Char8 as BS
 import Data.FileEmbed
@@ -131,9 +129,9 @@ startServer port = do
               runApiFn
                 (errWithStatus status400)
                 (\_ -> status status204)
-                -- \$ withResource pool (forkIO . updateAllFeeds)
+                $ forkIO
                 $ do
-                  print opml
+                  _ <- insertFeeds pool (catMaybes (extractXmlUrlsFromOpmlString opml))
                   pure ()
             (Links, List) -> do
               pageParams <- extractPageParams reqData

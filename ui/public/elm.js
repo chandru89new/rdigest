@@ -5584,7 +5584,7 @@ var $author$project$Main$digestDecoder = function () {
 		$elm$json$Json$Decode$map5,
 		F5(
 			function (l, t, fId, fTitle, fUrl) {
-				return {feedId: fId, feedTitle: fTitle, feedUrl: fUrl, link: l, title: t};
+				return {feedId: fId, feedTitle: fTitle, feedUrl: fUrl, link: l, title: t, updated: $elm$core$Maybe$Nothing};
 			}),
 		A2($elm$json$Json$Decode$field, 'link', $elm$json$Json$Decode$string),
 		A2(
@@ -6550,13 +6550,51 @@ var $author$project$Main$getDigests = F2(
 				url: model.apiEndpoint
 			});
 	});
-var $author$project$Main$GotFeedsList = function (a) {
-	return {$: 'GotFeedsList', a: a};
-};
 var $author$project$Main$Feed = F3(
 	function (id, url, title) {
 		return {id: id, title: title, url: url};
 	});
+var $author$project$Main$GotFeed = function (a) {
+	return {$: 'GotFeed', a: a};
+};
+var $author$project$Main$getFeed = F2(
+	function (model, feedId) {
+		return $elm$http$Http$post(
+			{
+				body: $elm$http$Http$jsonBody(
+					A3(
+						$author$project$Main$makePostBody,
+						'feeds',
+						'get',
+						$elm$core$Maybe$Just(
+							$elm$json$Json$Encode$object(
+								_List_fromArray(
+									[
+										_Utils_Tuple2(
+										'id',
+										$elm$json$Json$Encode$int(feedId))
+									]))))),
+				expect: A2(
+					$elm$http$Http$expectJson,
+					function (res) {
+						return $author$project$Main$GotFeed(
+							A2($elm$core$Result$mapError, $author$project$Main$httpErrorToString, res));
+					},
+					A4(
+						$elm$json$Json$Decode$map3,
+						$author$project$Main$Feed,
+						A2($elm$json$Json$Decode$field, 'id', $elm$json$Json$Decode$int),
+						A2($elm$json$Json$Decode$field, 'url', $elm$json$Json$Decode$string),
+						A2(
+							$elm$json$Json$Decode$field,
+							'title',
+							$elm$json$Json$Decode$maybe($elm$json$Json$Decode$string)))),
+				url: model.apiEndpoint
+			});
+	});
+var $author$project$Main$GotFeedsList = function (a) {
+	return {$: 'GotFeedsList', a: a};
+};
 var $author$project$Main$feedDecoder = function () {
 	var url = A2($elm$json$Json$Decode$field, 'url', $elm$json$Json$Decode$string);
 	var title = A2(
@@ -6604,6 +6642,85 @@ var $author$project$Main$getFeedsList = F2(
 				url: model.apiEndpoint
 			});
 	});
+var $author$project$Main$GotLinks = function (a) {
+	return {$: 'GotLinks', a: a};
+};
+var $author$project$Main$FeedLink = F3(
+	function (url, title, updated) {
+		return {title: title, updated: updated, url: url};
+	});
+var $author$project$Main$feedLinkDecoder = function () {
+	var urlDecoder = A2($elm$json$Json$Decode$field, 'url', $elm$json$Json$Decode$string);
+	var updatedDecoder = A2($elm$json$Json$Decode$field, 'updated', $elm$json$Json$Decode$string);
+	var titleDecoder = A2(
+		$elm$json$Json$Decode$field,
+		'title',
+		$elm$json$Json$Decode$maybe($elm$json$Json$Decode$string));
+	return A4($elm$json$Json$Decode$map3, $author$project$Main$FeedLink, urlDecoder, titleDecoder, updatedDecoder);
+}();
+var $elm$json$Json$Decode$andThen = _Json_andThen;
+var $author$project$Main$paramsDecoder = function () {
+	var limit = A2(
+		$elm$json$Json$Decode$andThen,
+		function (v) {
+			if (v.$ === 'Nothing') {
+				return $elm$json$Json$Decode$succeed(10);
+			} else {
+				var a = v.a;
+				return $elm$json$Json$Decode$succeed(a);
+			}
+		},
+		A2(
+			$elm$json$Json$Decode$field,
+			'limit',
+			$elm$json$Json$Decode$maybe($elm$json$Json$Decode$int)));
+	return A2(
+		$elm$json$Json$Decode$map,
+		function (l) {
+			return {limit: l};
+		},
+		limit);
+}();
+var $author$project$Main$getLinksForFeed = F2(
+	function (model, feedId) {
+		return $elm$http$Http$post(
+			{
+				body: $elm$http$Http$jsonBody(
+					A3(
+						$author$project$Main$makePostBody,
+						'links',
+						'list',
+						$elm$core$Maybe$Just(
+							$elm$json$Json$Encode$object(
+								_List_fromArray(
+									[
+										_Utils_Tuple2(
+										'limit',
+										$elm$json$Json$Encode$int(1000)),
+										_Utils_Tuple2(
+										'feed_id',
+										$elm$json$Json$Encode$int(feedId))
+									]))))),
+				expect: A2(
+					$elm$http$Http$expectJson,
+					function (res) {
+						return $author$project$Main$GotLinks(
+							A2($elm$core$Result$mapError, $author$project$Main$httpErrorToString, res));
+					},
+					A3(
+						$elm$json$Json$Decode$map2,
+						F2(
+							function (a, b) {
+								return _Utils_Tuple2(a, b);
+							}),
+						A2(
+							$elm$json$Json$Decode$field,
+							'links',
+							$elm$json$Json$Decode$list($author$project$Main$feedLinkDecoder)),
+						A2($elm$json$Json$Decode$field, 'params', $author$project$Main$paramsDecoder))),
+				url: model.apiEndpoint
+			});
+	});
 var $author$project$Main$getPageParams = function (r) {
 	switch (r.$) {
 		case 'Loading_':
@@ -6627,20 +6744,31 @@ var $author$project$Main$pageCmdsToRun = F2(
 							A2($author$project$Main$getDigestForDate, model, $elm$core$Maybe$Nothing)
 						]));
 			case 'FeedsPage':
-				return $elm$core$Platform$Cmd$batch(
-					_List_fromArray(
-						[
-							A2(
-							$author$project$Main$getFeedsList,
-							model,
-							{
-								limit: A3(
-									$elm$core$Basics$clamp,
-									100,
-									10000,
-									$author$project$Main$getPageParams(model.digests).limit)
-							})
-						]));
+				if (page.a.$ === 'Nothing') {
+					var _v1 = page.a;
+					return $elm$core$Platform$Cmd$batch(
+						_List_fromArray(
+							[
+								A2(
+								$author$project$Main$getFeedsList,
+								model,
+								{
+									limit: A3(
+										$elm$core$Basics$clamp,
+										100,
+										10000,
+										$author$project$Main$getPageParams(model.digests).limit)
+								})
+							]));
+				} else {
+					var id = page.a.a;
+					return $elm$core$Platform$Cmd$batch(
+						_List_fromArray(
+							[
+								A2($author$project$Main$getLinksForFeed, model, id),
+								A2($author$project$Main$getFeed, model, id)
+							]));
+				}
 			default:
 				var d = page.a;
 				return $elm$core$Platform$Cmd$batch(
@@ -6663,7 +6791,14 @@ var $author$project$Main$DashboardPage = {$: 'DashboardPage'};
 var $author$project$Main$DigestsPage = function (a) {
 	return {$: 'DigestsPage', a: a};
 };
-var $author$project$Main$FeedsPage = {$: 'FeedsPage'};
+var $author$project$Main$FeedsPage = function (a) {
+	return {$: 'FeedsPage', a: a};
+};
+var $elm$core$Basics$composeL = F3(
+	function (g, f, x) {
+		return g(
+			f(x));
+	});
 var $elm$url$Url$Parser$Parser = function (a) {
 	return {$: 'Parser', a: a};
 };
@@ -6671,6 +6806,40 @@ var $elm$url$Url$Parser$State = F5(
 	function (visited, unvisited, params, frag, value) {
 		return {frag: frag, params: params, unvisited: unvisited, value: value, visited: visited};
 	});
+var $elm$url$Url$Parser$custom = F2(
+	function (tipe, stringToSomething) {
+		return $elm$url$Url$Parser$Parser(
+			function (_v0) {
+				var visited = _v0.visited;
+				var unvisited = _v0.unvisited;
+				var params = _v0.params;
+				var frag = _v0.frag;
+				var value = _v0.value;
+				if (!unvisited.b) {
+					return _List_Nil;
+				} else {
+					var next = unvisited.a;
+					var rest = unvisited.b;
+					var _v2 = stringToSomething(next);
+					if (_v2.$ === 'Just') {
+						var nextValue = _v2.a;
+						return _List_fromArray(
+							[
+								A5(
+								$elm$url$Url$Parser$State,
+								A2($elm$core$List$cons, next, visited),
+								rest,
+								params,
+								frag,
+								value(nextValue))
+							]);
+					} else {
+						return _List_Nil;
+					}
+				}
+			});
+	});
+var $elm$url$Url$Parser$int = A2($elm$url$Url$Parser$custom, 'NUMBER', $elm$core$String$toInt);
 var $elm$url$Url$Parser$mapState = F2(
 	function (func, _v0) {
 		var visited = _v0.visited;
@@ -6884,39 +7053,6 @@ var $elm$url$Url$Parser$slash = F2(
 					parseBefore(state));
 			});
 	});
-var $elm$url$Url$Parser$custom = F2(
-	function (tipe, stringToSomething) {
-		return $elm$url$Url$Parser$Parser(
-			function (_v0) {
-				var visited = _v0.visited;
-				var unvisited = _v0.unvisited;
-				var params = _v0.params;
-				var frag = _v0.frag;
-				var value = _v0.value;
-				if (!unvisited.b) {
-					return _List_Nil;
-				} else {
-					var next = unvisited.a;
-					var rest = unvisited.b;
-					var _v2 = stringToSomething(next);
-					if (_v2.$ === 'Just') {
-						var nextValue = _v2.a;
-						return _List_fromArray(
-							[
-								A5(
-								$elm$url$Url$Parser$State,
-								A2($elm$core$List$cons, next, visited),
-								rest,
-								params,
-								frag,
-								value(nextValue))
-							]);
-					} else {
-						return _List_Nil;
-					}
-				}
-			});
-	});
 var $elm$url$Url$Parser$string = A2($elm$url$Url$Parser$custom, 'STRING', $elm$core$Maybe$Just);
 var $elm$url$Url$Parser$top = $elm$url$Url$Parser$Parser(
 	function (state) {
@@ -6932,8 +7068,15 @@ var $author$project$Main$parseUrl = function (url) {
 					A2($elm$url$Url$Parser$map, $author$project$Main$DashboardPage, $elm$url$Url$Parser$top),
 					A2(
 					$elm$url$Url$Parser$map,
-					$author$project$Main$FeedsPage,
+					$author$project$Main$FeedsPage($elm$core$Maybe$Nothing),
 					$elm$url$Url$Parser$s('feeds')),
+					A2(
+					$elm$url$Url$Parser$map,
+					A2($elm$core$Basics$composeL, $author$project$Main$FeedsPage, $elm$core$Maybe$Just),
+					A2(
+						$elm$url$Url$Parser$slash,
+						$elm$url$Url$Parser$s('feeds'),
+						$elm$url$Url$Parser$int)),
 					A2(
 					$elm$url$Url$Parser$map,
 					$author$project$Main$DigestsPage($elm$core$Maybe$Nothing),
@@ -6978,12 +7121,15 @@ var $author$project$Main$init = F3(
 						return ':' + $elm$core$String$fromInt(p);
 					},
 					url.port_)) + '/api/v1')),
+			currFeed: $author$project$Main$Loading,
 			currPage: $author$project$Main$parseUrl(url),
 			digestSearchTerm: '',
 			digests: $author$project$Main$Loading_(
-				{limit: 10}),
+				{limit: 100}),
+			feedLinks: $author$project$Main$Loading_(
+				{limit: 1000}),
 			feeds: $author$project$Main$Loading_(
-				{limit: 10}),
+				{limit: 100}),
 			key: key,
 			latestDigest: $author$project$Main$Loading,
 			url: url
@@ -7006,7 +7152,6 @@ var $author$project$Main$GotPromptResponse = function (a) {
 	return {$: 'GotPromptResponse', a: a};
 };
 var $elm$core$Platform$Sub$batch = _Platform_batch;
-var $elm$json$Json$Decode$andThen = _Json_andThen;
 var $elm$json$Json$Decode$index = _Json_decodeIndex;
 var $elm$json$Json$Decode$value = _Json_decodeValue;
 var $author$project$Main$getConfirmResponse = _Platform_incomingPort(
@@ -7194,10 +7339,43 @@ var $author$project$Main$addFeed = F2(
 				url: model.apiEndpoint
 			});
 	});
-var $elm$core$Basics$composeL = F3(
-	function (g, f, x) {
-		return g(
-			f(x));
+var $author$project$Main$ImportDone = function (a) {
+	return {$: 'ImportDone', a: a};
+};
+var $elm$http$Http$expectBytesResponse = F2(
+	function (toMsg, toResult) {
+		return A3(
+			_Http_expect,
+			'arraybuffer',
+			_Http_toDataView,
+			A2($elm$core$Basics$composeR, toResult, toMsg));
+	});
+var $elm$http$Http$expectWhatever = function (toMsg) {
+	return A2(
+		$elm$http$Http$expectBytesResponse,
+		toMsg,
+		$elm$http$Http$resolve(
+			function (_v0) {
+				return $elm$core$Result$Ok(_Utils_Tuple0);
+			}));
+};
+var $author$project$Main$addFeedsFromOpml = F2(
+	function (model, contents) {
+		return $elm$http$Http$post(
+			{
+				body: $elm$http$Http$jsonBody(
+					A3(
+						$author$project$Main$makePostBody,
+						'feeds',
+						'import',
+						$elm$core$Maybe$Just(contents))),
+				expect: $elm$http$Http$expectWhatever(
+					A2(
+						$elm$core$Basics$composeL,
+						$author$project$Main$ImportDone,
+						$elm$core$Result$mapError($author$project$Main$httpErrorToString))),
+				url: model.apiEndpoint
+			});
 	});
 var $elm$core$Task$onError = _Scheduler_onError;
 var $elm$core$Task$attempt = F2(
@@ -7254,34 +7432,9 @@ var $author$project$Main$deleteFeed = F2(
 	});
 var $elm$browser$Browser$Navigation$load = _Browser_load;
 var $elm$core$Debug$log = _Debug_log;
-var $elm$core$Task$fail = _Scheduler_fail;
-var $elm$core$Task$mapError = F2(
-	function (convert, task) {
-		return A2(
-			$elm$core$Task$onError,
-			A2($elm$core$Basics$composeL, $elm$core$Task$fail, convert),
-			task);
-	});
 var $elm$core$Platform$Cmd$none = $elm$core$Platform$Cmd$batch(_List_Nil);
 var $elm$browser$Browser$Navigation$pushUrl = _Browser_pushUrl;
 var $author$project$Main$NoOp = {$: 'NoOp'};
-var $elm$http$Http$expectBytesResponse = F2(
-	function (toMsg, toResult) {
-		return A3(
-			_Http_expect,
-			'arraybuffer',
-			_Http_toDataView,
-			A2($elm$core$Basics$composeR, toResult, toMsg));
-	});
-var $elm$http$Http$expectWhatever = function (toMsg) {
-	return A2(
-		$elm$http$Http$expectBytesResponse,
-		toMsg,
-		$elm$http$Http$resolve(
-			function (_v0) {
-				return $elm$core$Result$Ok(_Utils_Tuple0);
-			}));
-};
 var $author$project$Main$refreshFeed = function (model) {
 	return $elm$http$Http$post(
 		{
@@ -7323,7 +7476,6 @@ var $author$project$Main$showPrompt = _Platform_outgoingPort(
 					$elm$core$Basics$identity(b)
 				]));
 	});
-var $elm$core$Debug$toString = _Debug_toString;
 var $elm$time$Time$Posix = function (a) {
 	return {$: 'Posix', a: a};
 };
@@ -7389,30 +7541,100 @@ var $author$project$Main$update = F2(
 		switch (msg.$) {
 			case 'NoOp':
 				return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
+			case 'ImportDone':
+				var res = msg.a;
+				if (res.$ === 'Ok') {
+					return _Utils_Tuple2(
+						model,
+						$author$project$Main$showAlert('I\'m starting to extract and add the feeds. Might take a while. Wait for a minute or two, then \'Refresh feed\' to view your digests.'));
+				} else {
+					var e = res.a;
+					return _Utils_Tuple2(
+						model,
+						$author$project$Main$showAlert(e));
+				}
+			case 'GotFeed':
+				var res = msg.a;
+				var currFeed = function () {
+					if (res.$ === 'Err') {
+						var e = res.a;
+						return $author$project$Main$Error(e);
+					} else {
+						var f = res.a;
+						return $author$project$Main$Loaded(f);
+					}
+				}();
+				return _Utils_Tuple2(
+					_Utils_update(
+						model,
+						{currFeed: currFeed}),
+					$elm$core$Platform$Cmd$none);
+			case 'GetLinks':
+				var _int = msg.a;
+				return _Utils_Tuple2(
+					_Utils_update(
+						model,
+						{
+							feedLinks: $author$project$Main$Loading_(
+								$author$project$Main$getPageParams(model.feedLinks))
+						}),
+					A2($author$project$Main$getLinksForFeed, model, _int));
+			case 'GotLinks':
+				var res = msg.a;
+				if (res.$ === 'Err') {
+					var e = res.a;
+					return _Utils_Tuple2(
+						_Utils_update(
+							model,
+							{
+								feedLinks: A2(
+									$author$project$Main$Error_,
+									e,
+									$author$project$Main$getPageParams(model.feedLinks))
+							}),
+						$elm$core$Platform$Cmd$none);
+				} else {
+					var _v4 = res.a;
+					var ls = _v4.a;
+					var p = _v4.b;
+					return _Utils_Tuple2(
+						_Utils_update(
+							model,
+							{
+								feedLinks: A3($author$project$Main$Loaded_, ls, p, 0)
+							}),
+						$elm$core$Platform$Cmd$none);
+				}
 			case 'GotConfirmResponse':
-				var _v1 = msg.a;
-				var key = _v1.a;
-				var value = _v1.b;
-				var _v2 = _Utils_Tuple2(key, value);
-				if (_v2.a === 'deleteFeed') {
-					var url = _v2.b;
-					var id_ = A2($elm$json$Json$Decode$decodeValue, $elm$json$Json$Decode$string, url);
-					if (id_.$ === 'Ok') {
-						var v = id_.a;
+				var _v5 = msg.a;
+				var key = _v5.a;
+				var value = _v5.b;
+				var _v6 = _Utils_Tuple2(key, value);
+				switch (_v6.a) {
+					case 'deleteFeed':
+						var url = _v6.b;
+						var id_ = A2($elm$json$Json$Decode$decodeValue, $elm$json$Json$Decode$string, url);
+						if (id_.$ === 'Ok') {
+							var v = id_.a;
+							return _Utils_Tuple2(
+								model,
+								A2($author$project$Main$deleteFeed, model, v));
+						} else {
+							return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
+						}
+					case 'importFeeds':
+						var contents = _v6.b;
 						return _Utils_Tuple2(
 							model,
-							A2($author$project$Main$deleteFeed, model, v));
-					} else {
+							A2($author$project$Main$addFeedsFromOpml, model, contents));
+					default:
 						return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
-					}
-				} else {
-					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
 			case 'GotPromptResponse':
-				var _v4 = msg.a;
-				var key = _v4.a;
-				var value = _v4.b;
-				var _v5 = A2(
+				var _v8 = msg.a;
+				var key = _v8.a;
+				var value = _v8.b;
+				var _v9 = A2(
 					$elm$core$Debug$log,
 					'kv',
 					_Utils_Tuple2(key, value));
@@ -7442,21 +7664,37 @@ var $author$project$Main$update = F2(
 				return _Utils_Tuple2(model, $author$project$Main$triggerFileUpload);
 			case 'UploadedOpmlFile':
 				var file = msg.a;
-				var _v8 = A2($elm$core$Debug$log, 'called', '');
-				var _v9 = A2($elm$core$Debug$log, 'file', file);
 				return _Utils_Tuple2(
 					model,
 					A2(
 						$elm$core$Task$attempt,
 						$author$project$Main$ImportFeeds,
-						A2(
-							$elm$core$Task$mapError,
-							$elm$core$Debug$toString,
-							$elm$file$File$toString(file))));
+						$elm$file$File$toString(file)));
 			case 'ImportFeeds':
 				var opml = msg.a;
-				var _v10 = A2($elm$core$Debug$log, 'opml', opml);
-				return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
+				if (opml.$ === 'Err') {
+					var e = opml.a;
+					return _Utils_Tuple2(
+						model,
+						$author$project$Main$showAlert(e));
+				} else {
+					var contents = opml.a;
+					return _Utils_Tuple2(
+						model,
+						$author$project$Main$showConfirm(
+							_Utils_Tuple2(
+								'Ok. Are you sure you want to import the feeds?',
+								$elm$json$Json$Encode$object(
+									_List_fromArray(
+										[
+											_Utils_Tuple2(
+											'key',
+											$elm$json$Json$Encode$string('importFeeds')),
+											_Utils_Tuple2(
+											'value',
+											$elm$json$Json$Encode$string(contents))
+										])))));
+				}
 			case 'RefreshFeed':
 				return _Utils_Tuple2(
 					model,
@@ -7490,7 +7728,8 @@ var $author$project$Main$update = F2(
 				var url = msg.a;
 				var page = $author$project$Main$parseUrl(url);
 				var feeds = function () {
-					if (page.$ === 'FeedsPage') {
+					if ((page.$ === 'FeedsPage') && (page.a.$ === 'Nothing')) {
+						var _v16 = page.a;
 						return $author$project$Main$Loading_(
 							$author$project$Main$getPageParams(model.feeds));
 					} else {
@@ -7557,10 +7796,10 @@ var $author$project$Main$update = F2(
 							}),
 						$elm$core$Platform$Cmd$none);
 				} else {
-					var _v15 = res.a;
-					var feeds = _v15.a;
-					var p = _v15.b;
-					var total = _v15.c;
+					var _v18 = res.a;
+					var feeds = _v18.a;
+					var p = _v18.b;
+					var total = _v18.c;
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
@@ -7584,10 +7823,10 @@ var $author$project$Main$update = F2(
 							}),
 						$elm$core$Platform$Cmd$none);
 				} else {
-					var _v17 = res.a;
-					var digests = _v17.a;
-					var newPageParams = _v17.b;
-					var total = _v17.c;
+					var _v20 = res.a;
+					var digests = _v20.a;
+					var newPageParams = _v20.b;
+					var total = _v20.c;
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
@@ -7836,6 +8075,214 @@ var $author$project$Main$viewDigestsList = function (model) {
 					]));
 	}
 };
+var $elm$html$Html$ul = _VirtualDom_node('ul');
+var $elm$html$Html$li = _VirtualDom_node('li');
+var $author$project$Main$showUrl = function (url) {
+	var parsed = $elm$url$Url$fromString(url);
+	if (parsed.$ === 'Nothing') {
+		return url;
+	} else {
+		var u = parsed.a;
+		return _Utils_ap(
+			u.host,
+			_Utils_ap(
+				u.path,
+				_Utils_ap(
+					A2(
+						$elm$core$Maybe$withDefault,
+						'',
+						A2(
+							$elm$core$Maybe$map,
+							$elm$core$Basics$append('?'),
+							u.query)),
+					A2(
+						$elm$core$Maybe$withDefault,
+						'',
+						A2(
+							$elm$core$Maybe$map,
+							$elm$core$Basics$append('#'),
+							u.fragment)))));
+	}
+};
+var $elm$html$Html$Attributes$target = $elm$html$Html$Attributes$stringProperty('target');
+var $author$project$Main$viewLink = function (_v0) {
+	var link = _v0.link;
+	var title = _v0.title;
+	var updated = _v0.updated;
+	var className = _Utils_eq(updated, $elm$core$Maybe$Nothing) ? 'hidden' : '';
+	return A2(
+		$elm$html$Html$li,
+		_List_Nil,
+		_List_fromArray(
+			[
+				A2(
+				$elm$html$Html$span,
+				_List_fromArray(
+					[
+						$elm$html$Html$Attributes$class('flex flex-col gap-y-0.5')
+					]),
+				_List_fromArray(
+					[
+						A2(
+						$elm$html$Html$a,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$href(link),
+								$elm$html$Html$Attributes$target('_blank')
+							]),
+						_List_fromArray(
+							[
+								$elm$html$Html$text(
+								A2($elm$core$Maybe$withDefault, link, title))
+							])),
+						A2(
+						$elm$html$Html$span,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$class('text-xs opacity-70 flex items-center gap-x-2.5')
+							]),
+						_List_fromArray(
+							[
+								A2(
+								$elm$html$Html$a,
+								_List_fromArray(
+									[
+										$elm$html$Html$Attributes$class(className),
+										$elm$html$Html$Attributes$href(
+										'/digests/' + A2($elm$core$Maybe$withDefault, '', updated))
+									]),
+								_List_fromArray(
+									[
+										$elm$html$Html$text(
+										A2(
+											$elm$core$Maybe$withDefault,
+											'',
+											A2($elm$core$Maybe$map, $author$project$Main$toFriendlyDate, updated)))
+									])),
+								A2(
+								$elm$html$Html$span,
+								_List_fromArray(
+									[
+										$elm$html$Html$Attributes$class(className)
+									]),
+								_List_fromArray(
+									[
+										$elm$html$Html$text('•')
+									])),
+								A2(
+								$elm$html$Html$span,
+								_List_fromArray(
+									[
+										$elm$html$Html$Attributes$class('text-xs opacity-70')
+									]),
+								_List_fromArray(
+									[
+										$elm$html$Html$text(
+										$author$project$Main$showUrl(link))
+									]))
+							]))
+					]))
+			]));
+};
+var $author$project$Main$viewFeedLinks = function (model) {
+	var feedTitle = function () {
+		var _v2 = model.currFeed;
+		if (_v2.$ === 'Loaded') {
+			var feed = _v2.a;
+			return A2($elm$core$Maybe$withDefault, feed.url, feed.title);
+		} else {
+			return 'Loading...';
+		}
+	}();
+	var feedLinks = function () {
+		var _v1 = model.feedLinks;
+		if (_v1.$ === 'Loaded_') {
+			var fs = _v1.a;
+			return fs;
+		} else {
+			return _List_Nil;
+		}
+	}();
+	return A2(
+		$elm$html$Html$div,
+		_List_fromArray(
+			[
+				$elm$html$Html$Attributes$class('flex flex-col gap-y-6')
+			]),
+		_List_fromArray(
+			[
+				A2(
+				$elm$html$Html$div,
+				_List_fromArray(
+					[
+						$elm$html$Html$Attributes$class('font-semibold')
+					]),
+				_List_fromArray(
+					[
+						$elm$html$Html$text(feedTitle)
+					])),
+				A2(
+				$elm$html$Html$div,
+				_List_Nil,
+				function () {
+					var _v0 = model.feedLinks;
+					switch (_v0.$) {
+						case 'Error_':
+							var e = _v0.a;
+							return _List_fromArray(
+								[
+									$elm$html$Html$text(e)
+								]);
+						case 'Loading_':
+							return _List_fromArray(
+								[
+									$elm$html$Html$text('Loading...')
+								]);
+						default:
+							var fs = _v0.a;
+							var noLinks = !$elm$core$List$length(fs);
+							return _List_fromArray(
+								[
+									A2(
+									$elm$html$Html$ul,
+									_List_fromArray(
+										[
+											$elm$html$Html$Attributes$class(
+											noLinks ? 'hidden' : 'list-disc list-outside ml-4 space-y-4')
+										]),
+									A2(
+										$elm$core$List$map,
+										function (link) {
+											return $author$project$Main$viewLink(
+												{
+													link: link.url,
+													title: link.title,
+													updated: $elm$core$Maybe$Just(link.updated)
+												});
+										},
+										feedLinks)),
+									A2(
+									$elm$html$Html$div,
+									_List_fromArray(
+										[
+											$elm$html$Html$Attributes$class(
+											A2(
+												$elm$core$String$join,
+												' ',
+												_List_fromArray(
+													[
+														noLinks ? '' : 'hidden'
+													])))
+										]),
+									_List_fromArray(
+										[
+											$elm$html$Html$text('No links from this feed yet.')
+										]))
+								]);
+					}
+				}())
+			]));
+};
 var $author$project$Main$ShowConfirm = F2(
 	function (a, b) {
 		return {$: 'ShowConfirm', a: a, b: b};
@@ -7963,9 +8410,18 @@ var $author$project$Main$viewFeedsList = function (model) {
 									_List_fromArray(
 										[
 											A2(
-											$elm$html$Html$span,
+											$elm$html$Html$a,
 											_List_fromArray(
 												[
+													$elm$html$Html$Attributes$href(
+													A2(
+														$elm$core$String$join,
+														'/',
+														_List_fromArray(
+															[
+																'/feeds',
+																$elm$core$String$fromInt(f.id)
+															]))),
 													$elm$html$Html$Attributes$class('font-semibold')
 												]),
 											_List_fromArray(
@@ -8231,78 +8687,6 @@ var $elm$core$Tuple$second = function (_v0) {
 	var y = _v0.b;
 	return y;
 };
-var $elm$html$Html$ul = _VirtualDom_node('ul');
-var $elm$html$Html$li = _VirtualDom_node('li');
-var $author$project$Main$showUrl = function (url) {
-	var parsed = $elm$url$Url$fromString(url);
-	if (parsed.$ === 'Nothing') {
-		return url;
-	} else {
-		var u = parsed.a;
-		return _Utils_ap(
-			u.host,
-			_Utils_ap(
-				u.path,
-				_Utils_ap(
-					A2(
-						$elm$core$Maybe$withDefault,
-						'',
-						A2(
-							$elm$core$Maybe$map,
-							$elm$core$Basics$append('?'),
-							u.query)),
-					A2(
-						$elm$core$Maybe$withDefault,
-						'',
-						A2(
-							$elm$core$Maybe$map,
-							$elm$core$Basics$append('#'),
-							u.fragment)))));
-	}
-};
-var $elm$html$Html$Attributes$target = $elm$html$Html$Attributes$stringProperty('target');
-var $author$project$Main$viewLink = function (_v0) {
-	var link = _v0.link;
-	var title = _v0.title;
-	return A2(
-		$elm$html$Html$li,
-		_List_Nil,
-		_List_fromArray(
-			[
-				A2(
-				$elm$html$Html$span,
-				_List_fromArray(
-					[
-						$elm$html$Html$Attributes$class('flex flex-col gap-y-0.5')
-					]),
-				_List_fromArray(
-					[
-						A2(
-						$elm$html$Html$a,
-						_List_fromArray(
-							[
-								$elm$html$Html$Attributes$href(link),
-								$elm$html$Html$Attributes$target('_blank')
-							]),
-						_List_fromArray(
-							[
-								$elm$html$Html$text(
-								A2($elm$core$Maybe$withDefault, link, title))
-							])),
-						A2(
-						$elm$html$Html$span,
-						_List_fromArray(
-							[
-								$elm$html$Html$Attributes$class('text-xs opacity-70')
-							]),
-						_List_fromArray(
-							[
-								$elm$html$Html$text(
-								$author$project$Main$showUrl(link))
-							]))
-					]))
-			]));
-};
 var $author$project$Main$viewLinkGroup = function (_v0) {
 	var group = _v0.a;
 	var links = _v0.b;
@@ -8417,6 +8801,29 @@ var $author$project$Main$viewLatestDigest = F2(
 			case 'Error':
 				var e = r.a;
 				return A2(
+					$elm$core$String$contains,
+					'nothing found.',
+					$elm$core$String$toLower(e)) ? A2(
+					$elm$html$Html$div,
+					_List_fromArray(
+						[
+							$elm$html$Html$Attributes$class('opacity-60')
+						]),
+					_List_fromArray(
+						[
+							$elm$html$Html$text('No digests yet. Ensure you have '),
+							A2(
+							$elm$html$Html$a,
+							_List_fromArray(
+								[
+									$elm$html$Html$Attributes$href('/feeds')
+								]),
+							_List_fromArray(
+								[
+									$elm$html$Html$text('feeds')
+								])),
+							$elm$html$Html$text(' and try refreshing?')
+						])) : A2(
 					$elm$html$Html$div,
 					_List_Nil,
 					_List_fromArray(
@@ -8467,8 +8874,8 @@ var $author$project$Main$viewLatestDigest = F2(
 	});
 var $author$project$Main$view = function (model) {
 	var title = function () {
-		var _v2 = model.currPage;
-		switch (_v2.$) {
+		var _v3 = model.currPage;
+		switch (_v3.$) {
 			case 'DashboardPage':
 				return 'rdigest dashboard';
 			case 'FeedsPage':
@@ -8577,13 +8984,25 @@ var $author$project$Main$view = function (model) {
 									case 'DashboardPage':
 										return A2($author$project$Main$viewLatestDigest, model.digestSearchTerm, model.latestDigest);
 									case 'FeedsPage':
-										return A2(
-											$elm$html$Html$div,
-											_List_Nil,
-											_List_fromArray(
-												[
-													$author$project$Main$viewFeedsList(model)
-												]));
+										if (_v0.a.$ === 'Nothing') {
+											var _v1 = _v0.a;
+											return A2(
+												$elm$html$Html$div,
+												_List_Nil,
+												_List_fromArray(
+													[
+														$author$project$Main$viewFeedsList(model)
+													]));
+										} else {
+											var fid = _v0.a.a;
+											return A2(
+												$elm$html$Html$div,
+												_List_Nil,
+												_List_fromArray(
+													[
+														$author$project$Main$viewFeedLinks(model)
+													]));
+										}
 									default:
 										var d = _v0.a;
 										if (d.$ === 'Nothing') {

@@ -22,13 +22,13 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSChar
 import Data.Either
 import Data.FileEmbed
+import qualified Data.List
 import qualified Data.Map as Map
 import Data.Maybe
 import Data.Pool
 import Data.String (IsString (fromString))
 import Data.Time
 import Database.SQLite.Simple
-import Text.Read
 import Text.StringLike (StringLike (toString))
 import Types
 import Utils
@@ -55,7 +55,7 @@ insertFeed conn feedUrl = do
     then do
       feedContents <- fetchUrl feedUrl
       let title = extractTitleFromFeedUrl feedUrl feedContents
-      execute conn q (title, feedUrl)
+      execute' conn q (title, feedUrl)
       r' <- query' conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only feedUrl) :: IO [(Int, URL)]
       if (null r')
         then throw (GeneralError "Something went wrong. Try again?")
@@ -81,7 +81,7 @@ removeFeed url conn = do
 --   execute conn (fromString "DELETE FROM feeds where url = ?;") (Only url)
 
 setPragmas :: Connection -> IO ()
-setPragmas = flip execute_ (fromString "PRAGMA foreign_keys = ON;")
+setPragmas = flip execute_' (fromString "PRAGMA foreign_keys = ON;")
 
 doesMigrationTableExist :: Connection -> IO Bool
 doesMigrationTableExist = undefined
@@ -218,8 +218,27 @@ getTotalDigests conn = do
     (h : _) -> (fromOnly h)
     _ -> 0
 
-insertFeeds :: Connection -> [URL] -> IO [(Int, URL)]
-insertFeeds conn = mapM (insertFeed conn)
+insertFeeds :: Pool Connection -> [URL] -> IO [Maybe (Int, URL)]
+insertFeeds pool urls = do
+  withResource
+    pool
+    ( \conn -> do
+        existingFeeds <- query' conn (fromString ("select url from feeds where url in (" ++ (Data.List.intercalate "," (replicate (length urls) "?")) ++ ")")) (urls) >>= pure . Prelude.map fromOnly :: IO [String]
+        let filtered = Prelude.filter (`notElem` existingFeeds) urls
+        forM
+          filtered
+          ( \url -> do
+              putStrLn ("Importing " <> url)
+              res <- try' (insertFeed conn url)
+              case res of
+                Left e -> do
+                  _ <- print e
+                  pure Nothing
+                Right v -> do
+                  putStrLn ("Imported " <> url <> ".")
+                  pure $ Just v
+          )
+    )
 
 -- MIGRATION LOGIC
 
@@ -272,3 +291,15 @@ initDB = do
       ( \conn -> do
           applyMigrations conn
       )
+
+test' = do
+  runAppM $ do
+    Config{..} <- ask
+    liftIO $
+      withResource
+        connPool
+        ( \conn -> do
+            let urls = ["https://notes.druchan.com/feed.xml", "https://varunbarads.com/feed.xml"] :: [String]
+            res <- query' conn (fromString ("select url from feeds where url in (" ++ (Data.List.intercalate "," (replicate (length urls) "?")) ++ ")")) (urls) :: IO [Only String]
+            print res
+        )

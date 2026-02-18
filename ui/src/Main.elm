@@ -47,6 +47,8 @@ type alias Model =
     , digests : RemotePaginatedData String (List String)
     , currPage : Page
     , digestSearchTerm : String
+    , currFeed : RemoteData String Feed
+    , feedLinks : RemotePaginatedData String (List FeedLink)
     }
 
 
@@ -74,9 +76,13 @@ type Msg
     | TriggerFileUpload
     | UploadedOpmlFile File
     | ImportFeeds (Result String String)
+    | ImportDone (Result String ())
     | AddFeedResult (Result String ())
     | GotPromptResponse ( String, String )
     | GotConfirmResponse ( String, Encode.Value )
+    | GetLinks Int
+    | GotLinks (Result String ( List FeedLink, PageParams ))
+    | GotFeed (Result String Feed)
     | NoOp
 
 
@@ -111,13 +117,21 @@ type alias LinkItem =
     , feedId : Int
     , feedTitle : Maybe String
     , feedUrl : String
+    , updated : Maybe String
     }
 
 
 type Page
     = DashboardPage
-    | FeedsPage
+    | FeedsPage (Maybe Int)
     | DigestsPage (Maybe String)
+
+
+type alias FeedLink =
+    { url : String
+    , title : Maybe String
+    , updated : String
+    }
 
 
 
@@ -140,11 +154,13 @@ init () url key =
                     ++ "/api/v1"
             , key = key
             , url = url
-            , digests = Loading_ { limit = 10 }
-            , feeds = Loading_ { limit = 10 }
+            , digests = Loading_ { limit = 100 }
+            , feeds = Loading_ { limit = 100 }
             , latestDigest = Loading
             , currPage = parseUrl url
             , digestSearchTerm = ""
+            , feedLinks = Loading_ { limit = 1000 }
+            , currFeed = Loading
             }
     in
     ( initModel, Cmd.batch [ pageCmdsToRun initModel <| parseUrl url ] )
@@ -160,6 +176,37 @@ update msg model =
         NoOp ->
             ( model, Cmd.none )
 
+        ImportDone res ->
+            case res of
+                Ok _ ->
+                    ( model, showAlert "I'm starting to extract and add the feeds. Might take a while. Wait for a minute or two, then 'Refresh feed' to view your digests." )
+
+                Err e ->
+                    ( model, showAlert e )
+
+        GotFeed res ->
+            let
+                currFeed =
+                    case res of
+                        Err e ->
+                            Error e
+
+                        Ok f ->
+                            Loaded f
+            in
+            ( { model | currFeed = currFeed }, Cmd.none )
+
+        GetLinks int ->
+            ( { model | feedLinks = Loading_ (getPageParams model.feedLinks) }, getLinksForFeed model int )
+
+        GotLinks res ->
+            case res of
+                Err e ->
+                    ( { model | feedLinks = Error_ e (getPageParams model.feedLinks) }, Cmd.none )
+
+                Ok ( ls, p ) ->
+                    ( { model | feedLinks = Loaded_ ls p 0 }, Cmd.none )
+
         GotConfirmResponse ( key, value ) ->
             case ( key, value ) of
                 ( "deleteFeed", url ) ->
@@ -173,6 +220,9 @@ update msg model =
 
                         Err _ ->
                             ( model, Cmd.none )
+
+                ( "importFeeds", contents ) ->
+                    ( model, addFeedsFromOpml model contents )
 
                 _ ->
                     ( model, Cmd.none )
@@ -201,21 +251,23 @@ update msg model =
             ( model, triggerFileUpload )
 
         UploadedOpmlFile file ->
-            let
-                _ =
-                    Debug.log "called" ""
-
-                _ =
-                    Debug.log "file" file
-            in
-            ( model, File.toString file |> Task.mapError Debug.toString |> Task.attempt ImportFeeds )
+            ( model, File.toString file |> Task.attempt ImportFeeds )
 
         ImportFeeds opml ->
-            let
-                _ =
-                    Debug.log "opml" opml
-            in
-            ( model, Cmd.none )
+            case opml of
+                Err e ->
+                    ( model, showAlert e )
+
+                Ok contents ->
+                    ( model
+                    , showConfirm
+                        ( "Ok. Are you sure you want to import the feeds?"
+                        , Encode.object
+                            [ ( "key", Encode.string "importFeeds" )
+                            , ( "value", Encode.string contents )
+                            ]
+                        )
+                    )
 
         RefreshFeed ->
             ( model, Cmd.batch [ refreshFeed model, showAlert "Started refresh in the background. It may take several minutes. Check the terminal (where you started rdigest) for updates." ] )
@@ -239,7 +291,7 @@ update msg model =
 
                 feeds =
                     case page of
-                        FeedsPage ->
+                        FeedsPage Nothing ->
                             Loading_ (getPageParams model.feeds)
 
                         _ ->
@@ -316,6 +368,71 @@ subscriptions _ =
 -- VIEWS
 
 
+viewFeedLinks : Model -> Html Msg
+viewFeedLinks model =
+    let
+        feedTitle =
+            case model.currFeed of
+                Loaded feed ->
+                    Maybe.withDefault feed.url feed.title
+
+                _ ->
+                    "Loading..."
+
+        feedLinks =
+            case model.feedLinks of
+                Loaded_ fs _ _ ->
+                    fs
+
+                _ ->
+                    []
+    in
+    div [ class "flex flex-col gap-y-6" ]
+        [ div [ class "font-semibold" ] [ text feedTitle ]
+        , div [] <|
+            case model.feedLinks of
+                Error_ e _ ->
+                    [ text e ]
+
+                Loading_ _ ->
+                    [ text "Loading..." ]
+
+                Loaded_ fs _ _ ->
+                    let
+                        noLinks =
+                            List.length fs == 0
+                    in
+                    [ ul
+                        [ class
+                            (if noLinks then
+                                "hidden"
+
+                             else
+                                "list-disc list-outside ml-4 space-y-4"
+                            )
+                        ]
+                        (List.map
+                            (\link ->
+                                viewLink { link = link.url, title = link.title, updated = Just link.updated }
+                            )
+                            feedLinks
+                        )
+                    , div
+                        [ class
+                            ([ if noLinks then
+                                ""
+
+                               else
+                                "hidden"
+                             ]
+                                |> String.join " "
+                            )
+                        ]
+                        [ text "No links from this feed yet." ]
+                    ]
+        ]
+
+
 viewLinkGroup : ( ( String, String ), List LinkItem ) -> Html Msg
 viewLinkGroup ( group, links ) =
     div [ class "p-4 border rounded border-slate-200" ]
@@ -333,7 +450,11 @@ viewLatestDigest searchTerm r =
             div [] [ text "Loading..." ]
 
         Error e ->
-            div [] [ text e ]
+            if String.contains "nothing found." (String.toLower e) then
+                div [ class "opacity-60" ] [ text "No digests yet. Ensure you have ", a [ href "/feeds" ] [ text "feeds" ], text " and try refreshing?" ]
+
+            else
+                div [] [ text e ]
 
         Loaded digest ->
             let
@@ -359,13 +480,25 @@ viewLatestDigest searchTerm r =
             div [ class "flex flex-col gap-y-2.5" ] [ viewDigest digestFiltered ]
 
 
-viewLink : LinkItem -> Html Msg
-viewLink { link, title } =
+viewLink : { a | link : String, title : Maybe String, updated : Maybe String } -> Html Msg
+viewLink { link, title, updated } =
+    let
+        className =
+            if updated == Nothing then
+                "hidden"
+
+            else
+                ""
+    in
     li []
         [ span [ class "flex flex-col gap-y-0.5" ]
             [ a [ href link, target "_blank" ] [ text (Maybe.withDefault link title) ]
-            , span [ class "text-xs opacity-70" ]
-                [ text <| showUrl link
+            , span [ class "text-xs opacity-70 flex items-center gap-x-2.5" ]
+                [ a [ class className, href ("/digests/" ++ Maybe.withDefault "" updated) ] [ text (Maybe.withDefault "" (Maybe.map toFriendlyDate updated)) ]
+                , span [ class className ] [ text "•" ]
+                , span [ class "text-xs opacity-70" ]
+                    [ text <| showUrl link
+                    ]
                 ]
             ]
         ]
@@ -472,7 +605,7 @@ viewFeedsList model =
                     List.map
                         (\f ->
                             div [ class "border rounded-lg border-slate-200 p-3 flex gap-x-4 items-center items-start justify-between" ]
-                                [ span [ class "font-semibold" ] [ text (Maybe.withDefault f.url f.title) ]
+                                [ a [ href (String.join "/" [ "/feeds", fromInt f.id ]), class "font-semibold" ] [ text (Maybe.withDefault f.url f.title) ]
                                 , span [ class "flex items-center gap-x-2" ]
                                     [ span
                                         [ class "hidden cursor-pointer text-xs text-blue-600"
@@ -543,7 +676,7 @@ view model =
                 DashboardPage ->
                     "rdigest dashboard"
 
-                FeedsPage ->
+                FeedsPage _ ->
                     "rdigest feeds"
 
                 DigestsPage _ ->
@@ -566,8 +699,11 @@ view model =
                     DashboardPage ->
                         viewLatestDigest model.digestSearchTerm model.latestDigest
 
-                    FeedsPage ->
+                    FeedsPage Nothing ->
                         div [] [ viewFeedsList model ]
+
+                    FeedsPage (Just fid) ->
+                        div [] [ viewFeedLinks model ]
 
                     DigestsPage d ->
                         case d of
@@ -615,8 +751,14 @@ pageCmdsToRun model page =
         DashboardPage ->
             Cmd.batch [ getDigestForDate model Nothing ]
 
-        FeedsPage ->
+        FeedsPage Nothing ->
             Cmd.batch [ getFeedsList model { limit = Basics.clamp 100 10000 (getPageParams model.digests).limit } ]
+
+        FeedsPage (Just id) ->
+            Cmd.batch
+                [ getLinksForFeed model id
+                , getFeed model id
+                ]
 
         DigestsPage d ->
             Cmd.batch
@@ -634,7 +776,8 @@ parseUrl url =
         parse
             (Url.Parser.oneOf
                 [ Url.Parser.map DashboardPage Url.Parser.top
-                , Url.Parser.map FeedsPage (Url.Parser.s "feeds")
+                , Url.Parser.map (FeedsPage Nothing) (Url.Parser.s "feeds")
+                , Url.Parser.map (FeedsPage << Just) (Url.Parser.s "feeds" </> Url.Parser.int)
                 , Url.Parser.map (DigestsPage Nothing) (Url.Parser.s "digests")
                 , Url.Parser.map (\p -> DigestsPage (Just p)) (Url.Parser.s "digests" </> Url.Parser.string)
                 ]
@@ -790,6 +933,21 @@ makePostBody resource action requestData =
 -- DECODERS
 
 
+feedLinkDecoder : Decode.Decoder FeedLink
+feedLinkDecoder =
+    let
+        urlDecoder =
+            Decode.field "url" Decode.string
+
+        titleDecoder =
+            Decode.field "title" (Decode.maybe Decode.string)
+
+        updatedDecoder =
+            Decode.field "updated" Decode.string
+    in
+    Decode.map3 FeedLink urlDecoder titleDecoder updatedDecoder
+
+
 feedDecoder : Decode.Decoder Feed
 feedDecoder =
     let
@@ -810,7 +968,7 @@ feedListDecoder =
     Decode.list feedDecoder
 
 
-paramsDecoder : Decode.Decoder { limit : Int, offset : Int }
+paramsDecoder : Decode.Decoder { limit : Int }
 paramsDecoder =
     let
         limit =
@@ -825,20 +983,19 @@ paramsDecoder =
                                 Decode.succeed a
                     )
 
-        offset : Decode.Decoder Int
-        offset =
-            Decode.field "offset" (Decode.maybe Decode.int)
-                |> Decode.andThen
-                    (\v ->
-                        case v of
-                            Nothing ->
-                                Decode.succeed 0
-
-                            Just a ->
-                                Decode.succeed a
-                    )
+        -- offset : Decode.Decoder Int
+        -- offset =
+        --     Decode.field "offset" (Decode.maybe Decode.int)
+        --         |> Decode.andThen
+        --             (\v ->
+        --                 case v of
+        --                     Nothing ->
+        --                         Decode.succeed 0
+        --                     Just a ->
+        --                         Decode.succeed a
+        --             )
     in
-    Decode.map2 (\l o -> { limit = l, offset = o }) limit offset
+    Decode.map (\l -> { limit = l }) limit
 
 
 digestDecoder : Decode.Decoder Digest
@@ -851,7 +1008,7 @@ digestDecoder =
             Decode.field "links" (Decode.list linkDecoder)
 
         linkDecoder =
-            Decode.map5 (\l t fId fTitle fUrl -> { link = l, title = t, feedId = fId, feedTitle = fTitle, feedUrl = fUrl })
+            Decode.map5 (\l t fId fTitle fUrl -> { link = l, title = t, feedId = fId, feedTitle = fTitle, feedUrl = fUrl, updated = Nothing })
                 (Decode.field "link" Decode.string)
                 (Decode.field "title" (Decode.maybe Decode.string))
                 (Decode.field "feed_id" Decode.int)
@@ -863,6 +1020,67 @@ digestDecoder =
 
 
 -- API CALLS
+
+
+addFeedsFromOpml : Model -> Encode.Value -> Cmd Msg
+addFeedsFromOpml model contents =
+    Http.post
+        { url = model.apiEndpoint
+        , body = Http.jsonBody (makePostBody "feeds" "import" (Just contents))
+        , expect = Http.expectWhatever (ImportDone << Result.mapError httpErrorToString)
+        }
+
+
+getFeed : Model -> Int -> Cmd Msg
+getFeed model feedId =
+    Http.post
+        { url = model.apiEndpoint
+        , body =
+            Http.jsonBody
+                (makePostBody "feeds"
+                    "get"
+                    (Encode.object
+                        [ ( "id", Encode.int feedId )
+                        ]
+                        |> Just
+                    )
+                )
+        , expect =
+            Http.expectJson
+                (\res -> GotFeed (Result.mapError httpErrorToString res))
+                (Decode.map3
+                    Feed
+                    (Decode.field "id" Decode.int)
+                    (Decode.field "url" Decode.string)
+                    (Decode.field "title" <| Decode.maybe Decode.string)
+                )
+        }
+
+
+getLinksForFeed : Model -> Int -> Cmd Msg
+getLinksForFeed model feedId =
+    Http.post
+        { url = model.apiEndpoint
+        , body =
+            Http.jsonBody
+                (makePostBody "links"
+                    "list"
+                    (Encode.object
+                        [ ( "limit", Encode.int 1000 )
+                        , ( "feed_id", Encode.int feedId )
+                        ]
+                        |> Just
+                    )
+                )
+        , expect =
+            Http.expectJson
+                (\res -> GotLinks (Result.mapError httpErrorToString res))
+                (Decode.map2
+                    (\a b -> ( a, b ))
+                    (Decode.field "links" (Decode.list feedLinkDecoder))
+                    (Decode.field "params" paramsDecoder)
+                )
+        }
 
 
 deleteFeed : Model -> String -> Cmd Msg
