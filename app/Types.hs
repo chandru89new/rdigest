@@ -31,6 +31,7 @@ data Command
   | StartServer (Maybe Int)
   | UpdateFeeds
   | ShowDigest (Maybe Int)
+  | UpdateApp (Maybe String)
   | InvalidCommand
   deriving (Eq)
 
@@ -139,11 +140,12 @@ data ListFeedsResponse = ListFeedsResponse
   { lfrId :: Int
   , lfrTitle :: Maybe String
   , lfrUrl :: String
+  , lfrWebUrl :: String
   }
   deriving (Show)
 
 instance FromRow ListFeedsResponse where
-  fromRow = ListFeedsResponse <$> field <*> field <*> field
+  fromRow = ListFeedsResponse <$> field <*> field <*> field <*> field
 
 instance ToJSON ListFeedsResponse where
   toJSON (ListFeedsResponse{..}) =
@@ -151,6 +153,7 @@ instance ToJSON ListFeedsResponse where
       [ "id" .= lfrId
       , "url" .= lfrUrl
       , "title" .= lfrTitle
+      , "website_url" .= lfrWebUrl
       ]
 
 data PageParams = PageParams

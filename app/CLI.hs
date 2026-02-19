@@ -29,9 +29,9 @@ removeFeed' url = do
     _ <- setPragmas conn
     removeFeed url conn
 
-listFeeds :: AppM [(Maybe String, String)]
+listFeeds :: AppM [(Maybe String, String, String)]
 listFeeds = do
   Config{..} <- ask
   liftIO $ withResource connPool $ \conn -> do
     xs <- getFeedsListWithParams conn (PageParams 1000 0)
-    pure $ map (\ListFeedsResponse{..} -> (lfrTitle, lfrUrl)) xs
+    pure $ map (\ListFeedsResponse{..} -> (lfrTitle, lfrUrl, lfrWebUrl)) xs

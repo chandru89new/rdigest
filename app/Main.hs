@@ -10,19 +10,21 @@
 module Main where
 
 import CLI
-import Control.Monad (unless)
+import Control.Monad (forM_, unless)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Trans.Reader (ask)
 import DB
-import Data.List (intercalate)
+import Data.List (intercalate, isInfixOf)
 import Data.Maybe (fromMaybe)
 import Data.Pool (withResource)
 import Data.Version (showVersion)
+import Database.SQLite.Simple
 import Paths_rdigest (version)
 import Server (startServer)
 import System.Environment (getArgs)
 import System.IO (hFlush, stdout)
 import Text.Read (readMaybe)
+import Text.StringLike (fromString)
 import Types
 import Utils
 
@@ -61,7 +63,7 @@ main' command =
         else liftIO $ putStrLn "I have cancelled it."
     ListFeeds -> runAppM $ do
       feeds <- listFeeds
-      liftIO $ putStrLn $ intercalate "\n" (map (\(title, url) -> fromMaybe url title ++ " (" ++ url ++ ")") feeds)
+      liftIO $ putStrLn $ intercalate "\n" (map (\(title, url, website) -> fromMaybe url title ++ " | " ++ url ++ " | " ++ website) feeds)
     ShowVersion -> putStrLn ("rdigest v" ++ showVersion version)
     ShowHelp -> putStrLn progHelp
     UpdateFeeds -> runAppM updateAllFeedsM
@@ -84,6 +86,11 @@ main' command =
                     putStrLn $ "## Digest for date: " <> show digestDate
                     mapM_ (\DigestLink{..} -> putStrLn ("[" <> fromMaybe dlink dtitle <> "](" <> dlink <> ")")) digestLinks
             )
+    UpdateApp option -> case option of
+      Just "weburl" -> do
+        runAppM updateWebUrlInFeedsTable
+      Just _ -> putStrLn "I didnt quite understand that command. Try `rdigest help`?"
+      Nothing -> putStrLn "I need a command with `update` to know what to do. eg. `rdigest update weburl`"
     InvalidCommand -> do
       putStrLn "I could not recognize that command. Try `rdigest help`."
 
@@ -121,6 +128,9 @@ getCommand = do
     ("--version" : _) -> ShowVersion
     ("start" : port : _) -> StartServer (readMaybe port :: Maybe Int)
     ("start" : _) -> StartServer (Just 5500)
+    ("update" : rest) -> case rest of
+      [] -> UpdateApp Nothing
+      (h : _) -> UpdateApp (Just h)
     _ -> InvalidCommand
 
 userConfirmation :: String -> IO Bool
@@ -130,5 +140,30 @@ userConfirmation msg = do
   hFlush stdout
   input <- getLine
   pure $ input == "y" || input == "Y"
+
+updateWebUrlInFeedsTable :: AppM ()
+updateWebUrlInFeedsTable = do
+  Config{..} <- ask
+  liftIO $
+    withResource
+      connPool
+      ( \conn -> do
+          let q1 = "select url from feeds where title is null or website_url is null;"
+          let q2 = "update feeds set title = ?, website_url = ? where url = ?;"
+          urls <- try' (query_' conn (fromString q1) :: IO [Only String])
+          case urls of
+            Right urls' ->
+              forM_
+                urls'
+                ( \url -> do
+                    let u = fromOnly url
+                    putStrLn ("Updating title and website_url for: " ++ u)
+                    c <- fetchUrl u
+                    let (title, website_url) = getTitleAndWebsiteLink u c
+                    res <- try' $ execute' conn (fromString q2) (title, website_url, u)
+                    either showAppError (\_ -> putStrLn "Done.") res
+                )
+            Left _ -> pure ()
+      )
 
 -- TEST

@@ -61,6 +61,20 @@ extractTitleFromFeedUrl url' contents =
         "" -> url'
         x -> x
 
+extractLinkFromFeedYtUrl :: URL -> BS.ByteString -> String
+extractLinkFromFeedYtUrl url' contents =
+  let tags = parseTags (unpack $ decodeUtf8 contents)
+   in case getInnerText $ takeBetween "<uri>" "</uri>" tags of
+        "" -> url'
+        x -> x
+
+extractLinkFromFeedUrl :: URL -> BS.ByteString -> String
+extractLinkFromFeedUrl url' contents =
+  let tags = parseTags (unpack $ decodeUtf8 contents)
+   in case getInnerText $ takeBetween "<link>" "</link>" tags of
+        "" -> url'
+        x -> x
+
 getInnerText :: [Tag String] -> String
 getInnerText = trim . innerText
 
@@ -229,3 +243,9 @@ getYtRssFeeds urls = do
 
 -- dropTrailingSlash :: String -> String
 -- dropTrailingSlash str = if (Prelude.null str && (Prelude.last str == '/')) then Prelude.init str else str
+
+getTitleAndWebsiteLink :: URL -> BS.ByteString -> (String, String)
+getTitleAndWebsiteLink url contents = do
+  let title = extractTitleFromFeedUrl url contents
+  let website = if "youtube.com/feeds/videos.xml" `isInfixOf` (pack url) then extractLinkFromFeedYtUrl url contents else extractLinkFromFeedUrl url contents
+  (title, website)

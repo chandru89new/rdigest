@@ -34,7 +34,7 @@ import Types
 import Utils
 
 getFeedsListWithParams :: Connection -> PageParams -> IO [ListFeedsResponse]
-getFeedsListWithParams conn PageParams{..} = query' conn (fromString "select id, title, url from feeds order by id desc limit ? offset ?") (pageLimit, pageOffset)
+getFeedsListWithParams conn PageParams{..} = query' conn (fromString "select id, title, url, website_url from feeds order by id desc limit ? offset ?") (pageLimit, pageOffset)
 
 getFeed :: Int -> Connection -> IO [ListFeedsResponse]
 getFeed feedId conn = query' conn (fromString "select id, title, url from feeds where id = ?") (Only feedId)
@@ -48,14 +48,14 @@ getFeedLinksWithParams conn PageParams{..} maybeFeedId =
 insertFeed :: Connection -> URL -> IO (Int, URL)
 insertFeed conn feedUrl = do
   _ <- setPragmas conn
-  let q = fromString "INSERT INTO feeds (title,url) VALUES (?,?);"
+  let q = fromString "INSERT INTO feeds (title,url,website_url) VALUES (?,?,?);"
   let q' = fromString "SELECT id from feeds where url = ?;"
   res <- query' conn q' (Only feedUrl) :: IO [FeedId]
   if null res
     then do
       feedContents <- fetchUrl feedUrl
-      let title = extractTitleFromFeedUrl feedUrl feedContents
-      execute' conn q (title, feedUrl)
+      let (title, website) = getTitleAndWebsiteLink feedUrl feedContents
+      execute' conn q (title, feedUrl, website)
       r' <- query' conn (fromString "SELECT id, url FROM feeds where url = ?;") (Only feedUrl) :: IO [(Int, URL)]
       if (null r')
         then throw (GeneralError "Something went wrong. Try again?")
@@ -291,15 +291,3 @@ initDB = do
       ( \conn -> do
           applyMigrations conn
       )
-
-test' = do
-  runAppM $ do
-    Config{..} <- ask
-    liftIO $
-      withResource
-        connPool
-        ( \conn -> do
-            let urls = ["https://notes.druchan.com/feed.xml", "https://varunbarads.com/feed.xml"] :: [String]
-            res <- query' conn (fromString ("select url from feeds where url in (" ++ (Data.List.intercalate "," (replicate (length urls) "?")) ++ ")")) (urls) :: IO [Only String]
-            print res
-        )
