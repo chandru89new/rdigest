@@ -13,6 +13,9 @@ body {
 a {
   @apply text-blue-600;
 }
+.app-content a:visited {
+  @apply text-blue-300;
+}
 
 button {
   @apply bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-lg text-center flex items-center flex-nowrap not-disabled:cursor-pointer text-sm;

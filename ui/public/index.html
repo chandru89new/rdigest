@@ -12,6 +12,14 @@
   <script src="/elm.js"></script>
   <script>
     const app = Elm.Main.init();
+    let detailsOpen = 1;
+    app.ports.toggleDetails.subscribe(() => {
+      detailsOpen = !detailsOpen;
+      Array.from(document.querySelectorAll('details')).forEach(el => {
+        if (!detailsOpen) { el.removeAttribute('open'); }
+        else { el.setAttribute('open', true); }
+      });
+    })
     app.ports.showPrompt.subscribe(([str, opts]) => {
       const v = prompt(str, opts?.defaultValue);
       if (!!v && !!v.trim()) { app.ports.getPromptResponse.send([opts.key, v]); }

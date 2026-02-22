@@ -54,7 +54,9 @@ executable rdigest
                         aeson,
                         scotty,
                         http-types,
-                        containers
+                        containers,
+                        async,
+                        xml-conduit
     hs-source-dirs:   app
     default-language: Haskell2010
     ghc-options: -Wall -Wincomplete-patterns -threaded

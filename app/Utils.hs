@@ -17,10 +17,13 @@ import Control.Applicative
 import Control.Exception
 import Control.Monad.Trans.Reader
 import qualified Data.ByteString.Char8 as BS
+import Data.ByteString.Lazy (ByteString)
 import Data.CaseInsensitive
 import Data.FileEmbed
+import qualified Data.Map as Map
 import Data.Maybe
 import Data.Pool (defaultPoolConfig, destroyAllResources, newPool)
+import Data.String (IsString (fromString))
 import Data.Text
 import Data.Text.Encoding
 import Data.Time
@@ -29,6 +32,7 @@ import Network.HTTP.Simple hiding (Query)
 import Network.URI hiding (query)
 import System.Environment
 import Text.HTML.TagSoup
+import Text.XML
 import Types
 
 getDBFile :: String -> String
@@ -249,3 +253,18 @@ getTitleAndWebsiteLink url contents = do
   let title = extractTitleFromFeedUrl url contents
   let website = if "youtube.com/feeds/videos.xml" `isInfixOf` (pack url) then extractLinkFromFeedYtUrl url contents else extractLinkFromFeedUrl url contents
   (title, website)
+
+makeOpmlOutlineItem :: (URL, Maybe String) -> String
+makeOpmlOutlineItem (url, title) =
+  "<outline " ++ Prelude.unwords attrs ++ " />"
+ where
+  attrs = [toAttrib "title" (fromMaybe "" title), toAttrib "text" (fromMaybe "" title), toAttrib "xmlUrl" url, toAttrib "type" "rss", toAttrib "version" "RSS"]
+  toAttrib attrib val = attrib ++ "=" ++ "\"" ++ val ++ "\""
+
+generatelOpmlFile :: [(URL, Maybe String)] -> ByteString
+generatelOpmlFile urls =
+  renderLBS def (Document prologue root [])
+ where
+  prologue = Prologue [] Nothing []
+  root = Element "opml" (Map.singleton "version" "2.0") [NodeElement $ Element "body" Map.empty items]
+  items = Prelude.map (\(url, title) -> NodeElement $ Element "outline" (Map.fromList [("xmlUrl", fromString url), ("title", fromString (fromMaybe "" title)), ("text", fromString (fromMaybe "" title))]) []) urls

@@ -29,7 +29,7 @@ removeFeed' url = do
     _ <- setPragmas conn
     removeFeed url conn
 
-listFeeds :: AppM [(Maybe String, String, String)]
+listFeeds :: AppM [(Maybe String, String, Maybe String)]
 listFeeds = do
   Config{..} <- ask
   liftIO $ withResource connPool $ \conn -> do

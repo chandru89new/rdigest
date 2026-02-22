@@ -63,7 +63,7 @@ main' command =
         else liftIO $ putStrLn "I have cancelled it."
     ListFeeds -> runAppM $ do
       feeds <- listFeeds
-      liftIO $ putStrLn $ intercalate "\n" (map (\(title, url, website) -> fromMaybe url title ++ " | " ++ url ++ " | " ++ website) feeds)
+      liftIO $ putStrLn $ intercalate "\n" (map (\(title, url, website) -> fromMaybe url title ++ " | " ++ url ++ " | " ++ fromMaybe "" website) feeds)
     ShowVersion -> putStrLn ("rdigest v" ++ showVersion version)
     ShowHelp -> putStrLn progHelp
     UpdateFeeds -> runAppM updateAllFeedsM

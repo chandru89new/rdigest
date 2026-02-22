@@ -2,6 +2,7 @@ port module Main exposing (main)
 
 import Browser
 import Browser.Navigation as Nav
+import Date
 import Dict exposing (Dict)
 import File exposing (File)
 import File.Select
@@ -13,6 +14,7 @@ import Json.Decode as Decode
 import Json.Encode as Encode
 import String exposing (fromInt)
 import Task
+import Time
 import Url exposing (Url)
 import Url.Parser exposing ((</>), parse)
 
@@ -43,12 +45,14 @@ type alias Model =
     , url : Url
     , apiEndpoint : String
     , feeds : RemotePaginatedData String (List Feed)
-    , latestDigest : RemoteData String Digest
-    , digests : RemotePaginatedData String (List String)
+    , digest : RemoteData String Digest
+    , dashboardDigest : RemoteData String Digest
+    , digests : RemotePaginatedData String (List Date.Date)
     , currPage : Page
     , digestSearchTerm : String
     , currFeed : RemoteData String Feed
     , feedLinks : RemotePaginatedData String (List FeedLink)
+    , today : Maybe Date.Date -- if Nothing, date is not set.
     }
 
 
@@ -68,8 +72,8 @@ type Msg
     | ShowAlert String
     | GotFeedsList (Result String ( List Feed, PageParams, Int ))
     | GotDigest (Result String Digest)
-    | GotDigests (Result String ( List String, PageParams, Int ))
-    | GetDigest PageParams
+    | GetDigests PageParams
+    | GotDigests (Result String ( List Date.Date, PageParams, Int ))
     | GetFeeds PageParams
     | UpdateDigestSearchTerm String
     | RefreshFeed
@@ -83,6 +87,12 @@ type Msg
     | GetLinks Int
     | GotLinks (Result String ( List FeedLink, PageParams ))
     | GotFeed (Result String Feed)
+    | GetToday
+    | GotToday Date.Date
+    | GotDashboardDigest (Result String Digest)
+    | ToggleDetails
+    | BatchMsgs (List Msg)
+    | ExportFeeds
     | NoOp
 
 
@@ -106,7 +116,7 @@ type RemotePaginatedData e a
 
 
 type alias Digest =
-    { date : String
+    { date : Date.Date
     , links : List LinkItem
     }
 
@@ -117,7 +127,7 @@ type alias LinkItem =
     , feedId : Int
     , feedTitle : Maybe String
     , feedUrl : String
-    , updated : Maybe String
+    , updated : Maybe Date.Date
     }
 
 
@@ -130,7 +140,7 @@ type Page
 type alias FeedLink =
     { url : String
     , title : Maybe String
-    , updated : String
+    , updated : Date.Date
     }
 
 
@@ -156,14 +166,16 @@ init () url key =
             , url = url
             , digests = Loading_ { limit = 100 }
             , feeds = Loading_ { limit = 100 }
-            , latestDigest = Loading
+            , dashboardDigest = Loading
+            , digest = Loading
             , currPage = parseUrl url
             , digestSearchTerm = ""
             , feedLinks = Loading_ { limit = 1000 }
             , currFeed = Loading
+            , today = Nothing
             }
     in
-    ( initModel, Cmd.batch [ pageCmdsToRun initModel <| parseUrl url ] )
+    ( initModel, Cmd.batch [ Task.perform (\_ -> GetToday) (Task.succeed 1), pageCmdsToRun initModel <| parseUrl url ] )
 
 
 
@@ -175,6 +187,40 @@ update msg model =
     case msg of
         NoOp ->
             ( model, Cmd.none )
+
+        ExportFeeds ->
+            ( model, exportFeeds model )
+
+        BatchMsgs msgs ->
+            case msgs of
+                [] ->
+                    ( model, Cmd.none )
+
+                h :: rest ->
+                    let
+                        ( m, cmd ) =
+                            update h model
+                    in
+                    ( m, Cmd.batch [ cmd, Task.perform (\_ -> BatchMsgs rest) (Task.succeed 1) ] )
+
+        ToggleDetails ->
+            ( model, toggleDetails () )
+
+        GotDashboardDigest res ->
+            ( { model | dashboardDigest = resultToRemoteData res }, Cmd.none )
+
+        GetDigests p ->
+            ( model, getDigests model p )
+
+        GetToday ->
+            ( model, Task.perform GotToday Date.today )
+
+        GotToday d ->
+            let
+                newModel =
+                    { model | today = Just d }
+            in
+            ( newModel, getDigests newModel (getPageParams model.digests) )
 
         ImportDone res ->
             case res of
@@ -329,23 +375,40 @@ update msg model =
                     ( { model | feeds = Loaded_ feeds p total }, Cmd.none )
 
         GotDigests res ->
+            let
+                hasLatestDigest =
+                    case model.dashboardDigest of
+                        Loading ->
+                            False
+
+                        _ ->
+                            True
+            in
             case res of
                 Err e ->
-                    ( { model | digests = Error_ e (getPageParams model.digests) }, Cmd.none )
+                    ( { model | digests = Error_ e (getPageParams model.digests) }
+                    , if not hasLatestDigest then
+                        getLatestDigest model
+
+                      else
+                        Cmd.none
+                    )
 
                 Ok ( digests, newPageParams, total ) ->
-                    ( { model | digests = Loaded_ digests newPageParams total }, Cmd.none )
+                    let
+                        newModel =
+                            { model | digests = Loaded_ digests newPageParams total }
+                    in
+                    ( newModel
+                    , if hasLatestDigest then
+                        Cmd.none
+
+                      else
+                        getLatestDigest newModel
+                    )
 
         GotDigest res ->
-            case res of
-                Err e ->
-                    ( { model | latestDigest = Error e }, Cmd.none )
-
-                Ok digest ->
-                    ( { model | latestDigest = Loaded digest }, Cmd.none )
-
-        GetDigest pageParams ->
-            ( model, getDigests model pageParams )
+            ( { model | digest = resultToRemoteData res }, Cmd.none )
 
         GetFeeds pageParams ->
             ( model, getFeedsList model pageParams )
@@ -431,8 +494,8 @@ viewFeedLinks model =
 
 viewLinkGroup : ( ( String, String ), List LinkItem ) -> Html Msg
 viewLinkGroup ( group, links ) =
-    div [ class "p-4 border rounded border-slate-200" ]
-        [ h3 [ class "font-bold" ]
+    details [ class "p-4 border rounded-lg border-slate-200", property "open" (Encode.bool True) ]
+        [ summary [ class "cursor-pointer font-bold" ]
             [ text <| String.join "" [ Tuple.second group, " (", fromInt (List.length links), ")" ]
             ]
         , ul [ class "mt-3 space-y-4 list-disc list-outside ml-4" ] <| List.map viewLink links
@@ -476,7 +539,7 @@ viewLatestDigest searchTerm r =
             div [ class "flex flex-col gap-y-2.5" ] [ viewDigest digestFiltered ]
 
 
-viewLink : { a | link : String, title : Maybe String, updated : Maybe String } -> Html Msg
+viewLink : { a | link : String, title : Maybe String, updated : Maybe Date.Date } -> Html Msg
 viewLink { link, title, updated } =
     let
         className =
@@ -490,7 +553,7 @@ viewLink { link, title, updated } =
         [ span [ class "flex flex-col gap-y-0.5" ]
             [ a [ href link, target "_blank" ] [ text (Maybe.withDefault link title) ]
             , span [ class "text-xs opacity-70 flex items-center gap-x-2.5" ]
-                [ a [ class className, href ("/digests/" ++ Maybe.withDefault "" updated) ] [ text (Maybe.withDefault "" (Maybe.map toFriendlyDate updated)) ]
+                [ a [ class className, href ("/digests/" ++ Maybe.withDefault "" (Maybe.map toFriendlyDate updated)) ] [ text (Maybe.withDefault "" (Maybe.map toFriendlyDate updated)) ]
                 , span [ class className ] [ text "•" ]
                 , span [ class "text-xs opacity-70" ]
                     [ text <| showUrl link
@@ -512,7 +575,38 @@ viewDigestsList model =
         Loaded_ ls { limit } total ->
             if List.length ls > 0 then
                 div [ class "flex flex-col gap-y-3" ] <|
-                    (List.map (\s -> a [ class "border border-slate-200 rounded-lg p-3", href (String.join "/" [ "/digests", s ]) ] [ text <| toFriendlyDate s ]) ls
+                    (List.indexedMap
+                        (\i s ->
+                            let
+                                tag =
+                                    Maybe.andThen
+                                        (\today ->
+                                            if i > 1 then
+                                                Nothing
+
+                                            else if Date.compare s today == EQ then
+                                                Just "upcoming"
+
+                                            else
+                                                Just "latest"
+                                        )
+                                        model.today
+                            in
+                            a
+                                [ class "border border-slate-200 rounded-lg p-3 flex justify-between items-center", href (String.join "/" [ "/digests", dateToString s ]) ]
+                                [ text <| toFriendlyDate s
+                                , span
+                                    [ class
+                                        ([ "text-xs uppercase rounded-md text-black"
+                                         , Maybe.withDefault "hidden" tag
+                                         ]
+                                            |> String.join " "
+                                        )
+                                    ]
+                                    [ text (Maybe.withDefault "" tag) ]
+                                ]
+                        )
+                        ls
                         ++ [ span
                                 [ class
                                     (String.join " "
@@ -524,7 +618,7 @@ viewDigestsList model =
                                             ""
                                         ]
                                     )
-                                , onClick (GetDigest { limit = limit + 10000 })
+                                , onClick (GetDigests { limit = (getPageParams model.digests).limit + 100 })
                                 ]
                                 [ text "Load more..." ]
                            ]
@@ -546,9 +640,13 @@ viewDigest { date, links } =
             groupDigestLinksByFeedUrl links
     in
     div [ class "flex flex-col gap-y-4" ]
-        [ h3 [] [ text <| String.join "" [ toFriendlyDate date, " ", "(", fromInt <| List.length links, ")" ] ]
+        [ div [ class "flex items-center justify-between" ]
+            [ h3 []
+                [ text <| String.join "" [ toFriendlyDate date, " ", "(", fromInt <| List.length links, ")" ] ]
+            , span [ class "cursor-pointer text-blue-600", onClick ToggleDetails ] [ text "Toggle expand/collapse" ]
+            ]
         , input [ class "p-2 text-sm border rounded-md border-slate-200 w-full", placeholder "Search in digest...", onInput UpdateDigestSearchTerm ] []
-        , div [ class "grid grid-cols-1 lg:grid-cols-3 gap-4" ] <|
+        , div [ class "grid grid-cols-1 lg:grid-cols-1 gap-4" ] <|
             List.map viewLinkGroup (List.reverse <| List.sortBy (\( _, ls ) -> List.length ls) <| Dict.toList grouped)
         ]
 
@@ -573,6 +671,8 @@ viewFeedsList model =
                         [ text "+ Add RSS feed" ]
                     , button [ onClick TriggerFileUpload, class "" ]
                         [ text "+ Import OPML" ]
+                    , button [ class "" ]
+                        [ a [ href "/export-opml", target "_blank" ] [ text "Export OPML" ] ]
                     ]
                 , div
                     [ class
@@ -681,19 +781,21 @@ view model =
     { title = title
     , body =
         [ div [ id "app", class "flex flex-col gap-y-4" ]
-            [ h1 [] [ a [ href "/" ] [ text "rdigest — dashboard" ] ]
-            , div [ class "flex gap-x-3" ]
-                [ a [ href "/digests" ] [ text "View digests" ]
-                , span [] [ text <| "•" ]
-                , a [ href "/feeds" ] [ text "View/manage feeds" ]
-                , span [] [ text <| "•" ]
-                , span [ onClick RefreshFeed, class "text-green-500 cursor-pointer" ] [ text "Refresh feeds" ]
+            [ h1 [ class "flex items-center gap-x-4" ]
+                [ a [ href "/" ] [ text "rdigest — " ]
+                , div [ class "flex gap-x-3" ]
+                    [ a [ href "/digests" ] [ text "(digests)" ]
+                    , span [] [ text <| "•" ]
+                    , a [ href "/feeds" ] [ text "(feeds)" ]
+                    , span [] [ text <| "•" ]
+                    , span [ onClick RefreshFeed, class "text-green-500 cursor-pointer" ] [ text "(refresh)" ]
+                    ]
                 ]
             , hr [ class "border-0 h-[1px] bg-slate-400" ] []
-            , div []
+            , div [ class "app-content" ]
                 [ case model.currPage of
                     DashboardPage ->
-                        viewLatestDigest model.digestSearchTerm model.latestDigest
+                        viewLatestDigest model.digestSearchTerm model.dashboardDigest
 
                     FeedsPage Nothing ->
                         div [] [ viewFeedsList model ]
@@ -707,7 +809,7 @@ view model =
                                 viewDigestsList model
 
                             Just _ ->
-                                viewLatestDigest model.digestSearchTerm model.latestDigest
+                                viewLatestDigest model.digestSearchTerm model.digest
                 ]
             ]
         ]
@@ -715,7 +817,37 @@ view model =
 
 
 
--- UTILS/HELPERS
+-- HELPERS
+
+
+resultToRemoteData : Result e a -> RemoteData e a
+resultToRemoteData res =
+    case res of
+        Err e ->
+            Error e
+
+        Ok a ->
+            Loaded a
+
+
+toDateDefault : String -> Date.Date
+toDateDefault d =
+    case toDate d of
+        Just v ->
+            v
+
+        Nothing ->
+            Date.fromCalendarDate 2020 Time.Jan 1
+
+
+toDate : String -> Maybe Date.Date
+toDate str =
+    Result.toMaybe <| Date.fromIsoString str
+
+
+dateToString : Date.Date -> String
+dateToString =
+    Date.format "YYYY-MM-dd"
 
 
 triggerFileUpload : Cmd Msg
@@ -745,7 +877,7 @@ pageCmdsToRun : Model -> Page -> Cmd Msg
 pageCmdsToRun model page =
     case page of
         DashboardPage ->
-            Cmd.batch [ getDigestForDate model Nothing ]
+            Cmd.batch [ Task.perform (\_ -> GetToday) (Task.succeed 1) ]
 
         FeedsPage Nothing ->
             Cmd.batch [ getFeedsList model { limit = Basics.clamp 100 10000 (getPageParams model.digests).limit } ]
@@ -762,7 +894,7 @@ pageCmdsToRun model page =
                     getDigests model { limit = Basics.clamp 10 10000 (getPageParams model.digests).limit }
 
                   else
-                    getDigestForDate model d
+                    getDigestForDate model (Maybe.map (\a -> toDateDefault a) d)
                 ]
 
 
@@ -830,18 +962,9 @@ toMonthString m =
             m
 
 
-toFriendlyDate : String -> String
-toFriendlyDate dateString =
-    let
-        parts =
-            String.split "-" dateString
-    in
-    case parts of
-        year :: month :: date :: _ ->
-            String.join "" [ date, " ", toMonthString month, ", ", year ]
-
-        _ ->
-            dateString
+toFriendlyDate : Date.Date -> String
+toFriendlyDate =
+    Date.format "MMM dd, YYYY"
 
 
 groupDigestLinksByFeedUrl : List LinkItem -> Dict ( String, String ) (List LinkItem)
@@ -939,7 +1062,7 @@ feedLinkDecoder =
             Decode.field "title" (Decode.maybe Decode.string)
 
         updatedDecoder =
-            Decode.field "updated" Decode.string
+            Decode.field "updated" Decode.string |> Decode.map toDateDefault
     in
     Decode.map3 FeedLink urlDecoder titleDecoder updatedDecoder
 
@@ -999,6 +1122,15 @@ digestDecoder =
     let
         date =
             Decode.field "date" Decode.string
+                |> Decode.map
+                    (\d ->
+                        case toDate d of
+                            Just v ->
+                                v
+
+                            Nothing ->
+                                Date.fromCalendarDate 2020 Time.Jan 1
+                    )
 
         links =
             Decode.field "links" (Decode.list linkDecoder)
@@ -1016,6 +1148,51 @@ digestDecoder =
 
 
 -- API CALLS
+
+
+exportFeeds : Model -> Cmd Msg
+exportFeeds model =
+    Http.post
+        { url = model.apiEndpoint
+        , body = Http.jsonBody (makePostBody "feeds" "export" Nothing)
+        , expect = Http.expectWhatever (\_ -> NoOp)
+        }
+
+
+getLatestDigest : Model -> Cmd Msg
+getLatestDigest model =
+    let
+        ds =
+            case model.digests of
+                Loaded_ xs _ _ ->
+                    xs
+
+                _ ->
+                    []
+
+        latestDigestDate =
+            Maybe.andThen
+                (\today -> List.head (List.filter (fn today) ds))
+                model.today
+
+        fn t d =
+            Date.compare d t == LT
+    in
+    Http.post
+        { url = model.apiEndpoint
+        , body = Http.jsonBody (makePostBody "digests" "get" (Maybe.map (Encode.string << dateToString) latestDigestDate))
+        , expect =
+            Http.expectJson
+                (\res ->
+                    case res of
+                        Err e ->
+                            GotDashboardDigest (Err <| httpErrorToString e)
+
+                        Ok f ->
+                            GotDashboardDigest (Ok f)
+                )
+                digestDecoder
+        }
 
 
 addFeedsFromOpml : Model -> Encode.Value -> Cmd Msg
@@ -1185,11 +1362,11 @@ getFeedsList model p =
         }
 
 
-getDigestForDate : Model -> Maybe String -> Cmd Msg
+getDigestForDate : Model -> Maybe Date.Date -> Cmd Msg
 getDigestForDate model maybeDate =
     Http.post
         { url = model.apiEndpoint
-        , body = Http.jsonBody (makePostBody "digests" "get" (Maybe.map Encode.string maybeDate))
+        , body = Http.jsonBody (makePostBody "digests" "get" (Maybe.map (Encode.string << dateToString) maybeDate))
         , expect =
             Http.expectJson
                 (\res ->
@@ -1224,7 +1401,17 @@ getDigests model pageParams =
                         Ok f ->
                             GotDigests (Ok f)
                 )
-                (Decode.map3 (\a b c -> ( a, b, c )) (Decode.field "digests" <| Decode.list Decode.string) (Decode.succeed pageParams) (Decode.field "total" Decode.int))
+                (Decode.map3 (\a b c -> ( a, b, c ))
+                    (Decode.field "digests" <|
+                        Decode.list
+                            (Decode.map
+                                toDateDefault
+                                Decode.string
+                            )
+                    )
+                    (Decode.succeed pageParams)
+                    (Decode.field "total" Decode.int)
+                )
         }
 
 
@@ -1248,3 +1435,10 @@ port getPromptResponse : (( String, String ) -> msg) -> Sub msg
 
 
 port getConfirmResponse : (( String, Encode.Value ) -> msg) -> Sub msg
+
+
+port toggleDetails : () -> Cmd msg
+
+
+
+-- TEST

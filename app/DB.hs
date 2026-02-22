@@ -13,6 +13,8 @@
 
 module DB where
 
+import Control.Concurrent (MVar, forkIO, newMVar, putMVar, takeMVar)
+import Control.Concurrent.Async (concurrently, mapConcurrently, mapConcurrently_)
 import Control.Exception.Base
 import Control.Monad
 import Control.Monad.IO.Class
@@ -37,7 +39,7 @@ getFeedsListWithParams :: Connection -> PageParams -> IO [ListFeedsResponse]
 getFeedsListWithParams conn PageParams{..} = query' conn (fromString "select id, title, url, website_url from feeds order by id desc limit ? offset ?") (pageLimit, pageOffset)
 
 getFeed :: Int -> Connection -> IO [ListFeedsResponse]
-getFeed feedId conn = query' conn (fromString "select id, title, url from feeds where id = ?") (Only feedId)
+getFeed feedId conn = query' conn (fromString "select id, title, url, website_url from feeds where id = ?") (Only feedId)
 
 getFeedLinksWithParams :: Connection -> PageParams -> Maybe Int -> IO [FeedLinksResponse]
 getFeedLinksWithParams conn PageParams{..} maybeFeedId =
@@ -134,8 +136,8 @@ queryToCheckIfItemExists = fromString "select link, title, updated from feed_ite
 insertFeedQuery :: Query
 insertFeedQuery = fromString "INSERT INTO feed_items (title, link, updated, feed_id) VALUES (?, ?, ?, ?);" :: Query
 
-processFeed :: (Int, URL) -> AppM ()
-processFeed (feedId, url) = do
+processFeed :: (Int, URL) -> MVar () -> AppM ()
+processFeed (feedId, url) mvar = do
   Config{..} <- ask
   liftIO $ putStrLn $ "Processing: " ++ url
   liftIO $ withResource connPool $ \conn -> do
@@ -146,7 +148,9 @@ processFeed (feedId, url) = do
     unwrappedFeedItems <- evaluate (extractFeedItems contents) >>= (pure . fromMaybe [])
     when (null unwrappedFeedItems) $ do
       putStrLn $ "I couldn't find anything on: " ++ url ++ "."
+    takeMVar mvar
     res <- (try' $ doInserts conn unwrappedFeedItems)
+    putMVar mvar ()
     when ((not . null) unwrappedFeedItems && isRight res) $ do
       putStrLn $ "Finished processing " ++ url ++ "."
       putStrLn $ "Discovered: " ++ show (length unwrappedFeedItems) ++ " posts."
@@ -164,11 +168,18 @@ processFeed (feedId, url) = do
 
 processFeeds :: [(Int, URL)] -> IO ()
 processFeeds urls = do
-  forM_ urls $ \url -> do
-    res <- try' $ runAppM $ processFeed url
-    case res of
-      Left e -> showAppError e
-      Right _ -> pure ()
+  let chunks = chunksOf 50 urls
+  mvar <- newMVar ()
+  forM_ chunks $ \chunk -> do
+    mapConcurrently_
+      ( \url ->
+          do
+            res <- try' $ runAppM $ processFeed url mvar
+            case res of
+              Left e -> showAppError e
+              Right _ -> pure ()
+      )
+      chunk
 
 updateAllFeedsM :: AppM ()
 updateAllFeedsM = do
@@ -291,3 +302,6 @@ initDB = do
       ( \conn -> do
           applyMigrations conn
       )
+
+getAllFeedsForOpmlExport :: Connection -> IO [(URL, Maybe String)]
+getAllFeedsForOpmlExport conn = query_' conn (fromString "select url, title from feeds order by id desc")
