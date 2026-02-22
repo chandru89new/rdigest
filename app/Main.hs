@@ -14,7 +14,7 @@ import Control.Monad (forM_, unless)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Trans.Reader (ask)
 import DB
-import Data.List (intercalate, isInfixOf)
+import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
 import Data.Pool (withResource)
 import Data.Version (showVersion)

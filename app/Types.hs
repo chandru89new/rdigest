@@ -89,7 +89,7 @@ instance ToJSON TgMsg where
 
 data Resource = Health | Echo | Feeds | Links | Digests | InvalidResource deriving (Show)
 
-data Action = Test | Export | Add | List | Get | Remove | Refresh | Import | InvalidAction deriving (Show)
+data Action = Test | Add | List | Get | Remove | Refresh | Import | InvalidAction deriving (Show)
 
 data RpcRequest = RpcRequest
   { reqResource :: Resource
@@ -126,7 +126,6 @@ instance FromJSON Action where
     "remove" -> pure Remove
     "refresh" -> pure Refresh
     "import" -> pure Import
-    "export" -> pure Export
     _ -> pure InvalidAction
 
 instance FromJSON RpcRequest where

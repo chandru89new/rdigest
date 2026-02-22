@@ -92,7 +92,6 @@ type Msg
     | GotDashboardDigest (Result String Digest)
     | ToggleDetails
     | BatchMsgs (List Msg)
-    | ExportFeeds
     | NoOp
 
 
@@ -187,9 +186,6 @@ update msg model =
     case msg of
         NoOp ->
             ( model, Cmd.none )
-
-        ExportFeeds ->
-            ( model, exportFeeds model )
 
         BatchMsgs msgs ->
             case msgs of
@@ -657,7 +653,7 @@ viewFeedsList model =
         Loading_ _ ->
             div [] [ text "Loading feeds..." ]
 
-        Error_ e p ->
+        Error_ e _ ->
             div [] [ text e ]
 
         Loaded_ feeds p total ->
@@ -800,7 +796,7 @@ view model =
                     FeedsPage Nothing ->
                         div [] [ viewFeedsList model ]
 
-                    FeedsPage (Just fid) ->
+                    FeedsPage (Just _) ->
                         div [] [ viewFeedLinks model ]
 
                     DigestsPage d ->
@@ -917,49 +913,6 @@ parseUrl url =
 
         Nothing ->
             DashboardPage
-
-
-toMonthString : String -> String
-toMonthString m =
-    case m of
-        "01" ->
-            "January"
-
-        "02" ->
-            "February"
-
-        "03" ->
-            "March"
-
-        "04" ->
-            "April"
-
-        "05" ->
-            "May"
-
-        "06" ->
-            "June"
-
-        "07" ->
-            "July"
-
-        "08" ->
-            "August"
-
-        "09" ->
-            "September"
-
-        "10" ->
-            "October"
-
-        "11" ->
-            "November"
-
-        "12" ->
-            "December"
-
-        _ ->
-            m
 
 
 toFriendlyDate : Date.Date -> String
@@ -1150,15 +1103,6 @@ digestDecoder =
 -- API CALLS
 
 
-exportFeeds : Model -> Cmd Msg
-exportFeeds model =
-    Http.post
-        { url = model.apiEndpoint
-        , body = Http.jsonBody (makePostBody "feeds" "export" Nothing)
-        , expect = Http.expectWhatever (\_ -> NoOp)
-        }
-
-
 getLatestDigest : Model -> Cmd Msg
 getLatestDigest model =
     let
@@ -1282,7 +1226,7 @@ handleRawHttpResponse decoder response =
             Decode.map2 (\a b -> ( a, b )) (Decode.at [ "error", "type" ] Decode.string) (Decode.at [ "error", "message" ] Decode.string)
     in
     case response of
-        Http.GoodStatus_ metadata body ->
+        Http.GoodStatus_ _ body ->
             let
                 b =
                     if String.trim body == "" then

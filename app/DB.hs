@@ -13,8 +13,8 @@
 
 module DB where
 
-import Control.Concurrent (MVar, forkIO, newMVar, putMVar, takeMVar)
-import Control.Concurrent.Async (concurrently, mapConcurrently, mapConcurrently_)
+import Control.Concurrent (MVar, newMVar, putMVar, takeMVar)
+import Control.Concurrent.Async (mapConcurrently_)
 import Control.Exception.Base
 import Control.Monad
 import Control.Monad.IO.Class
@@ -110,7 +110,7 @@ getDigestsFull conn PageParams{..} = do
     g (link, title, feedId, feedTitle, feedUrl) = DigestLink link title feedId feedTitle feedUrl
 
 getDigests :: Connection -> PageParams -> IO [Day]
-getDigests conn p@PageParams{..} = do
+getDigests conn PageParams{..} = do
   let q1 = "SELECT distinct updated from feed_items ORDER BY updated DESC limit ? offset ?;"
   res <- query' conn (fromString q1) (pageLimit, pageOffset) :: IO [Only Day]
   pure $ map fromOnly res

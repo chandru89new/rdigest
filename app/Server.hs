@@ -22,11 +22,9 @@ import Data.Aeson
 import Data.Aeson.Types (parseMaybe)
 import Data.ByteString hiding (isSuffixOf, pack)
 import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Lazy as LBS
 import Data.FileEmbed
 import Data.Maybe
 import Data.Pool
-import Data.String
 import Data.Text
 import Data.Text.Lazy hiding (Text, isSuffixOf, pack)
 import Database.SQLite.Simple
@@ -38,6 +36,7 @@ import Web.Scotty (ActionM, captureParam, finish, get, json, jsonData, post, raw
 uiFiles :: [(FilePath, BS.ByteString)]
 uiFiles = $(embedDir "ui/public")
 
+indexFile :: Maybe ByteString
 indexFile = lookup "index.html" uiFiles
 
 getContentType :: FilePath -> Text
