@@ -14,6 +14,7 @@
 module Server where
 
 import Control.Concurrent
+import Control.Concurrent.Async (concurrently, concurrently_)
 import Control.Monad (join)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
@@ -134,7 +135,7 @@ startServer port = do
               runApiFn
                 (errWithStatus status400)
                 (\_ -> status status204)
-                $ withResource pool (forkIO . updateAllFeeds)
+                $ withResource pool (\conn -> concurrently_ (updateAllFeeds conn) (pure ()))
             (Feeds, Import) -> do
               opml <- parseRequest reqData :: ActionM String
               runApiFn

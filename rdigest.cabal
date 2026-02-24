@@ -56,7 +56,8 @@ executable rdigest
                         http-types,
                         containers,
                         async,
-                        xml-conduit
+                        xml-conduit,
+                        unliftio
     hs-source-dirs:   app
     default-language: Haskell2010
-    ghc-options: -Wall -Wincomplete-patterns -threaded
+    ghc-options: -Wall -Wincomplete-patterns -threaded "-with-rtsopts=-xn -N"

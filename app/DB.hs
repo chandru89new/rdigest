@@ -33,6 +33,7 @@ import Data.Time
 import Database.SQLite.Simple
 import Text.StringLike (StringLike (toString))
 import Types
+import UnliftIO (pooledForConcurrentlyN_)
 import Utils
 
 getFeedsListWithParams :: Connection -> PageParams -> IO [ListFeedsResponse]
@@ -83,7 +84,10 @@ removeFeed url conn = do
 --   execute conn (fromString "DELETE FROM feeds where url = ?;") (Only url)
 
 setPragmas :: Connection -> IO ()
-setPragmas = flip execute_' (fromString "PRAGMA foreign_keys = ON;")
+setPragmas conn = do
+  execute_' conn (fromString "PRAGMA foreign_keys = ON;")
+  execute_' conn (fromString "PRAGMA busy_timeout = 10000;")
+  execute_' conn (fromString "PRAGMA wal = 1;")
 
 doesMigrationTableExist :: Connection -> IO Bool
 doesMigrationTableExist = undefined
@@ -168,18 +172,17 @@ processFeed (feedId, url) mvar = do
 
 processFeeds :: [(Int, URL)] -> IO ()
 processFeeds urls = do
-  let chunks = chunksOf 50 urls
   mvar <- newMVar ()
-  forM_ chunks $ \chunk -> do
-    mapConcurrently_
-      ( \url ->
-          do
-            res <- try' $ runAppM $ processFeed url mvar
-            case res of
-              Left e -> showAppError e
-              Right _ -> pure ()
-      )
-      chunk
+  pooledForConcurrentlyN_
+    5
+    urls
+    ( \url ->
+        do
+          res <- try' $ runAppM $ processFeed url mvar
+          case res of
+            Left e -> showAppError e
+            Right _ -> pure ()
+    )
 
 updateAllFeedsM :: AppM ()
 updateAllFeedsM = do
