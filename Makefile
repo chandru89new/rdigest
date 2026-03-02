@@ -7,10 +7,10 @@ build-cli:
 	cabal build --disable-profiling --enable-split-sections && cabal install --overwrite-policy=always --disable-profiling --enable-split-sections --installdir=./release
 
 build-ui: 
-	cd ui && yarn build
+	cd ui && yarn && yarn build
 
 build-ui-dev: 
-	cd ui && yarn build-dev
+	cd ui && yarn && yarn build-dev
 
 debug-build:
 	cabal build --ghc-options="-prof -fprof-auto -rtsopts" && cabal install --overwrite-policy=always
