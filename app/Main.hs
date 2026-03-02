@@ -10,12 +10,12 @@
 module Main where
 
 import CLI
-import Control.Concurrent.Async (concurrently_)
 import Control.Monad (forM_, unless)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Trans.Reader (ask)
 import DB
 import Data.List (intercalate)
+import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Pool (withResource)
 import Data.Version (showVersion)
@@ -86,8 +86,14 @@ main' command =
                 case r of
                   [] -> putStrLn "No digests found."
                   (Digest{..} : _) -> do
-                    putStrLn $ "## Digest for date: " <> show digestDate
-                    mapM_ (\DigestLink{..} -> putStrLn ("[" <> fromMaybe dlink dtitle <> "](" <> dlink <> ")")) digestLinks
+                    putStrLn $ "# Digest for date: " <> show digestDate
+                    let groupedByFeed = groupByFeed digestLinks
+                    mapM_
+                      ( \((ftitle, _), urls) -> do
+                          putStrLn $ "\n## " <> ftitle
+                          mapM_ (\(title, url) -> putStrLn $ "[" <> fromMaybe url title <> "](" <> url <> ")") urls
+                      )
+                      groupedByFeed
             )
     UpdateApp option -> case option of
       Just "weburl" -> do
@@ -170,5 +176,16 @@ updateWebUrlInFeedsTable = do
                 )
             Left _ -> pure ()
       )
+
+groupByFeed :: [DigestLink] -> [((String, URL), [(Maybe String, String)])]
+groupByFeed xs = Map.toList $ go xs Map.empty
+ where
+  go :: [DigestLink] -> Map.Map (String, URL) [(Maybe String, String)] -> Map.Map (String, URL) [(Maybe String, String)]
+  go [] acc = acc
+  go (DigestLink{..} : rest) acc =
+    go rest (Map.alter f (fromMaybe dfeedUrl dfeedTitle, dfeedUrl) acc)
+   where
+    f Nothing = Just [(dtitle, dlink)]
+    f (Just x) = Just $ (dtitle, dlink) : x
 
 -- TEST

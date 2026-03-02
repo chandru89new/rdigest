@@ -14,7 +14,7 @@
 module Server where
 
 import Control.Concurrent
-import Control.Concurrent.Async (concurrently, concurrently_)
+import Control.Concurrent.Async (concurrently_)
 import Control.Monad (join)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader

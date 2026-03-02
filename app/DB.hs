@@ -31,7 +31,6 @@ import Data.Pool
 import Data.String (IsString (fromString))
 import Data.Time
 import Database.SQLite.Simple
-import GHC.MVar (MVar (MVar))
 import Text.StringLike (StringLike (toString))
 import Types
 import UnliftIO (pooledForConcurrentlyN_)
@@ -149,7 +148,6 @@ processFeed connPool (feedId, url) mvar = do
     feedIdExists <- query' conn (fromString "SELECT id FROM feeds where id = ?;") (Only feedId) :: IO [FeedId]
     when (null feedIdExists) $ throw $ DatabaseError "You have to first add this feed to your database. Try `rdigest add <url>`."
     contents <- fetchUrl url
-    putStrLn $ show contents
     !unwrappedFeedItems <- evaluate (extractFeedItems contents) >>= (pure . fromMaybe [])
     when (feedId == 605) $ do
       putStrLn (">>> " ++ url ++ show unwrappedFeedItems)
