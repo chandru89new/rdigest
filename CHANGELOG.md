@@ -1,5 +1,11 @@
 # rdigest - Changelog
 
+## v0.3.4
+
+- Local server to view digests, import OPML, manage feeds.
+- Add a small migration support module for future updates to DB.
+- Lotsa cleanup.
+
 ## v0.3.3
 
 - Check for duplicates before trying to add a feed.
