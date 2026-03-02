@@ -60,7 +60,7 @@ Make sure you set up an `RDIGEST_FOLDER` environment variable before you use `rd
 
 # create latest full digest. (latest full digest means the digest for the previous day)
 > rdigest digest 2
-# the number 2 is an offset. it means "2nd" previous day.
+# the number 2 is an offset. 1 = today. 2 = yesterday. 3 = day before yesterday and so on...
 
 # view the upcoming digest
 > rdigest digest
