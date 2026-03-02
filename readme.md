@@ -44,63 +44,31 @@ Make sure you set up an `RDIGEST_FOLDER` environment variable before you use `rd
 > rdigest help
 
 # adds an RSS feed, and will immediately get posts from that feed and add to the database
-> rdigest add <feed_url>
+> rdigest feeds add <feed_url>
 
 # removes the feed and deletes all posts that belong to that feed
-> rdigest remove <feed_url>
+> rdigest feeds remove <feed_url>
 
 # show all feeds
-> rdigest list feeds
+> rdigest feeds list
 
 # refresh all feeds, get all their posts/content and update the database. No duplicate content will be added though.
-> rdigest refresh
+> rdigest feeds update
 
-# create today's digest.
+# refresh just one particular feed
+> rdigest feeds update <feed_url>
+
+# create latest full digest. (latest full digest means the digest for the previous day)
+> rdigest digest 2
+# the number 2 is an offset. it means "2nd" previous day.
+
+# view the upcoming digest
 > rdigest digest
 
-# create a digest between the date range
-> rdigest digest --from YYYY-MM-DD --to YYYY-MM-DD
-
-# just update one feed
-> rdigest refresh <feed_url>
-
-# send notifications to Telegram channel
-> rdigest notify
-# check the Telegram Notification section for more info
-
-# delete everything, remove the database. This won't delete the digests.
-> rdigest purge
 ```
-
-## Telegram Notification
-
-`rdigest` can, if needed, send the daily digest links as messages to a Telegram chat/channel.
-
-To do this:
-
-- create a Telegram bot and grab the bot's token.
-- create a Telegram channel and get the channel's ID (usually a negative integer)
-- invite the bot you created into the channel you created with Admin-like privileges (ie, the bot should be able to post messages to the channel)
-- in your terminal where you run `rdigest`, set these env vars:
-
-```sh
-> export TG_TOKEN=<bot token>
-> export TG_CHANNEL_ID=<the channel id>
-```
-
-- get rdigest to send the notifications:
-
-```sh
-> rdigest notify
-```
-
-Links that are sent as notifications will be marked, so they won't be sent again.
-
-Note: Due to Telegram's rate limits, `rdigest` will space-out batches of notifications, with ~1 minute wait time between sending out each batch of 20 or so notifications.
 
 ## Roadmap
 
 - [x] create pre-built binaries for Linux for release
 - [x] create pre-built binaries for Mac for release
-- [x] add TG bot notification support
-- [ ] add GUI
+- [x] add GUI
