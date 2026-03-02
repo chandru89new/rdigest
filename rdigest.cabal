@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               rdigest
-version:            0.3.3
+version:            0.4.0
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -19,7 +19,13 @@ maintainer:         chandru89new@gmail.com
 -- A copyright notice.
 -- copyright:
 -- category:
-extra-doc-files: CHANGELOG.md, index-template.html, template.html, migrations/1.sql
+extra-doc-files:    CHANGELOG.md,
+                    index-template.html,
+                    template.html,
+                    migrations/*.sql,
+                    ui/public/index.html,
+                    ui/public/*.js,
+                    ui/public/*.css
 
 common warnings
     ghc-options: -Wall
@@ -30,9 +36,10 @@ executable rdigest
     import:           warnings
     main-is:          Main.hs
 
-    other-modules:     Paths_rdigest
+    other-modules:     Paths_rdigest, Server, Types, Utils, DB, CLI
     -- other-extensions:
     build-depends:      base,
+                        deepseq,
                         tagsoup,
                         text,
                         http-conduit,
@@ -45,7 +52,13 @@ executable rdigest
                         file-embed,
                         case-insensitive,
                         directory,
-                        aeson
+                        aeson,
+                        scotty,
+                        http-types,
+                        containers,
+                        async,
+                        xml-conduit,
+                        unliftio
     hs-source-dirs:   app
     default-language: Haskell2010
-    ghc-options: -Wall -Wincomplete-patterns
+    ghc-options: -Wall -Wincomplete-patterns -threaded "-with-rtsopts=-N"

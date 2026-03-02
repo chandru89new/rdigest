@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>rdigest dashboard</title>
+  <link href="/style.css" rel="stylesheet" />
+</head>
+
+<body>
+  <script src="/elm.js"></script>
+  <script>
+    const app = Elm.Main.init();
+    let detailsOpen = 1;
+    app.ports.toggleDetails.subscribe(() => {
+      detailsOpen = !detailsOpen;
+      Array.from(document.querySelectorAll('details')).forEach(el => {
+        if (!detailsOpen) { el.removeAttribute('open'); }
+        else { el.setAttribute('open', true); }
+      });
+    })
+    app.ports.showPrompt.subscribe(([str, opts]) => {
+      const v = prompt(str, opts?.defaultValue);
+      if (!!v && !!v.trim()) { app.ports.getPromptResponse.send([opts.key, v]); }
+
+    })
+    app.ports.showConfirm.subscribe(([str, opts]) => {
+      const v = confirm(str);
+      if (v) { app.ports.getConfirmResponse.send([opts.key, opts.value]) }
+    })
+    app.ports.showAlert.subscribe(str => {
+      alert(str)
+    })
+  </script>
+</body>
+
+</html>

@@ -2,3 +2,7 @@ dist-newstyle/
 rdigest.db
 digest-*.html
 release/
+rdtest
+node_modules
+ui/node_modules
+ui/elm-stuff

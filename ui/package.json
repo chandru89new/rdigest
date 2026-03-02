@@ -1,0 +1,20 @@
+{
+  "dependencies": {
+    "@tailwindcss/cli": "^4.1.18",
+    "elm": "^0.19.1-6",
+    "nodemon": "^3.1.11",
+    "tailwindcss": "^4.1.18",
+    "uglify-js": "^3.17.4"
+  },
+  "scripts": {
+    "setup": "yarn install",
+    "build-css": "yarn tailwindcss -i src/style.css -o public/style.css --minify",
+    "build-elm": "elm make src/Main.elm --output=public/elm.js --optimize && yarn minify",
+    "build": "yarn build-css && yarn build-elm",
+    "build-elm-dev": "elm make src/Main.elm --output=public/elm.js",
+    "build-dev": "yarn build-css && yarn build-elm-dev",
+    "minify": "uglifyjs public/elm.js --compress 'pure_funcs=[F2,F3,F4,F5,F6,F7,F8,F9,A2,A3,A4,A5,A6,A7,A8,A9],pure_getters,keep_fargs=false,unsafe_comps,unsafe' | uglifyjs --mangle --output public/elm.js",
+    "serve": "npx serve public",
+    "watch": "nodemon -w src -w public/index.html -e 'elm html css' -x 'yarn build-dev'"
+  }
+}
