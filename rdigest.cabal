@@ -20,8 +20,6 @@ maintainer:         chandru89new@gmail.com
 -- copyright:
 -- category:
 extra-doc-files:    CHANGELOG.md,
-                    index-template.html,
-                    template.html,
                     migrations/*.sql,
                     ui/public/index.html,
                     ui/public/*.js,
