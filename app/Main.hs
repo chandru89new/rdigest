@@ -16,7 +16,7 @@ import Control.Monad.Trans.Reader (ask)
 import DB
 import Data.List (intercalate)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Pool (withResource)
 import Data.Version (showVersion)
 import Database.SQLite.Simple
@@ -25,7 +25,7 @@ import Server (startServer)
 import System.Environment (getArgs)
 import System.IO (hFlush, stdout)
 import Text.Read (readMaybe)
-import Text.StringLike (fromString)
+import Text.StringLike (StringLike (toString), fromString)
 import Types
 import Utils
 
@@ -100,23 +100,36 @@ main' command =
         runAppM updateWebUrlInFeedsTable
       Just _ -> putStrLn "I didnt quite understand that command. Try `rdigest help`?"
       Nothing -> putStrLn "I need a command with `update` to know what to do. eg. `rdigest update weburl`"
-    InvalidCommand -> do
-      putStrLn "I could not recognize that command. Try `rdigest help`."
+    ExportOpml -> do
+      runAppM $ do
+        Config{..} <- ask
+        liftIO $ withResource connPool $ \conn -> do
+          res <- getAllFeedsForOpmlExport conn
+          putStrLn $ toString $ generatelOpmlFile res
+    ImportOpml file -> runAppM $ do
+      Config{..} <- ask
+      opml <- liftIO $ failWith GeneralError $ readFile file
+      _ <- liftIO $ insertFeeds connPool (catMaybes (extractXmlUrlsFromOpmlString opml))
+      liftIO $ putStrLn "Done! To get the latest from the feeds, try `rdigest feeds udpate`."
+    InvalidCommand str -> do
+      putStrLn str
 
 -- FUNCTIONS
 progHelp :: String
 progHelp =
   "Usage: rdigest <command> [args]\n\
   \Commands:\n\
-  \  help                  - Show this help.\n\
-  \  version               - Show version info.\n\
-  \  init                  - Initialize the database.\n\
-  \  feeds add <url>       - Add a feed. <url> must be valid HTTP(S) URL.\n\
-  \  feeds remove <url>    - Remove a feed and all its associated posts.\n\
-  \  feeds list            - List all feeds.\n\
-  \  feeds update          - Update/refresh all feeds.\n\
-  \  digest [offset]       - Show a digest by offset (1 = latest, 2 = previous, etc.). Optional. If no offset given, 1 is assumed.\n\
-  \  start [port]          - Start the API server on the given port (optional) or on 5500 if no port given.\n"
+  \  help                           - Show this help.\n\
+  \  version                        - Show version info.\n\
+  \  init                           - Initialize the database.\n\
+  \  feeds add <url>                - Add a feed. <url> must be valid HTTP(S) URL.\n\
+  \  feeds remove <url>             - Remove a feed and all its associated posts.\n\
+  \  feeds list                     - List all feeds.\n\
+  \  feeds update                   - Update/refresh all feeds.\n\
+  \  feeds export                   - Export your feeds as OPML data. Prints to stdout.\n\
+  \  feeds import <file_path>       - Import feeds from an OPML file.\n\
+  \  digest [offset]                - Show a digest by offset (1 = latest, 2 = previous, etc.). Optional. If no offset given, 1 is assumed.\n\
+  \  start [port]                   - Start the API server on the given port (optional) or on 5500 if no port given.\n"
 
 getCommand :: IO Command
 getCommand = do
@@ -131,7 +144,9 @@ getCommand = do
       ("update" : urest) -> case urest of
         [] -> UpdateFeeds
         (u : _) -> UpdateFeed u
-      _ -> InvalidCommand
+      ("export" : _) -> ExportOpml
+      ("import" : file : _) -> ImportOpml file
+      _ -> InvalidCommand "I don't recognize that command under `rdigest feeds`. Please try `rdigest help` for a list of all available commands."
     ("digest" : rest) -> case rest of
       [] -> ShowDigest (Just 1)
       (offset : _) -> ShowDigest (readMaybe offset :: Maybe Int)
@@ -142,7 +157,7 @@ getCommand = do
     ("update" : rest) -> case rest of
       [] -> UpdateApp Nothing
       (h : _) -> UpdateApp (Just h)
-    _ -> InvalidCommand
+    _ -> InvalidCommand "I don't recognize that command. Please try `rdigest help`."
 
 userConfirmation :: String -> IO Bool
 userConfirmation msg = do

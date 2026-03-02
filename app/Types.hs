@@ -33,7 +33,9 @@ data Command
   | UpdateFeed String
   | ShowDigest (Maybe Int)
   | UpdateApp (Maybe String)
-  | InvalidCommand
+  | ExportOpml
+  | ImportOpml String
+  | InvalidCommand String
   deriving (Eq)
 
 data AppError

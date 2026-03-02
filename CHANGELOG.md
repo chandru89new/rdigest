@@ -1,6 +1,10 @@
 # rdigest - Changelog
 
-## v0.3.4
+## v0.4.1
+
+- Import/export feeds via CLI.
+
+## v0.4.0
 
 - Local server to view digests, import OPML, manage feeds.
 - Add a small migration support module for future updates to DB.
