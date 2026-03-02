@@ -60,32 +60,32 @@ failWith' mkError action = do
 
 extractTitleFromFeedUrl :: URL -> BS.ByteString -> String
 extractTitleFromFeedUrl url' contents =
-  let tags = parseTags (unpack $ decodeUtf8 contents)
+  let tags = parseTags (decodeUtf8 contents)
    in case getInnerText $ takeBetween "<title>" "</title>" tags of
         "" -> url'
         x -> x
 
 extractLinkFromFeedYtUrl :: URL -> BS.ByteString -> String
 extractLinkFromFeedYtUrl url' contents =
-  let tags = parseTags (unpack $ decodeUtf8 contents)
+  let tags = parseTags (decodeUtf8 contents)
    in case getInnerText $ takeBetween "<uri>" "</uri>" tags of
         "" -> url'
         x -> x
 
 extractLinkFromFeedUrl :: URL -> BS.ByteString -> String
 extractLinkFromFeedUrl url' contents =
-  let tags = parseTags (unpack $ decodeUtf8 contents)
+  let tags = parseTags (decodeUtf8 contents)
    in case getInnerText $ takeBetween "<link>" "</link>" tags of
         "" -> url'
         x -> x
 
-getInnerText :: [Tag String] -> String
-getInnerText = trim . innerText
+getInnerText :: [Tag Text] -> String
+getInnerText = unpack . strip . innerText
 
 trim :: String -> String
 trim = unpack . strip . pack
 
-takeBetween :: String -> String -> [Tag String] -> [Tag String]
+takeBetween :: String -> String -> [Tag Text] -> [Tag Text]
 takeBetween start end tags = Prelude.takeWhile (~/= end) $ Prelude.dropWhile (~/= start) tags
 
 try' :: IO a -> IO (Either AppError a)
@@ -125,7 +125,7 @@ extractFeedItems :: BS.ByteString -> Maybe [FeedItem]
 extractFeedItems = parseContents
  where
   parseContents c =
-    let tags = parseTags (unpack $ decodeUtf8 c)
+    let tags = parseTags (decodeUtf8 c)
         entryTags = partitions (~== ("<entry>" :: String)) tags -- this is for youtube feeds only
         itemTags = partitions (~== ("<item>" :: String)) tags
      in case (itemTags, entryTags) of
@@ -134,7 +134,7 @@ extractFeedItems = parseContents
           ([], ys) -> Just $ Prelude.map extractFeedItem ys
           (xs, ys) -> Just $ Prelude.map extractFeedItem (xs ++ ys)
 
-extractFeedItem :: [Tag String] -> FeedItem
+extractFeedItem :: [Tag Text] -> FeedItem
 extractFeedItem tags =
   let title = getInnerText $ takeBetween "<title>" "</title>" tags
       linkFromYtFeed = extractLinkHref tags -- youtube specific
@@ -145,29 +145,29 @@ extractFeedItem tags =
       updated = pubDate <|> publishedDate <|> updatedDate
    in FeedItem{title = title, link = link <|> linkFromYtFeed, updated = updated >>= parseDate}
 
-extractLinkHref :: [Tag String] -> Maybe String
+extractLinkHref :: [Tag Text] -> Maybe String
 extractLinkHref tags =
   let links = extractBetweenTag "link" tags
    in case links of
-        (h : _) -> Just $ fromAttrib "href" h
+        (h : _) -> Just $ unpack $ fromAttrib "href" h
         _ -> Nothing
 
-extractBetweenTag :: String -> [Tag String] -> [Tag String]
+extractBetweenTag :: Text -> [Tag Text] -> [Tag Text]
 extractBetweenTag tag tags =
   let startTag = TagOpen tag []
       endTag = TagClose tag
    in Prelude.takeWhile (~/= endTag) $ Prelude.dropWhile (~/= startTag) tags
 
-extractXmlUrl :: Tag String -> (Maybe String)
+extractXmlUrl :: Tag Text -> (Maybe String)
 extractXmlUrl tag =
   let xs = extractBetweenTag "outline" [tag]
    in case xs of
-        (h : _) -> (Just $ fromAttrib "xmlUrl" h)
+        (h : _) -> (Just $ unpack $ fromAttrib "xmlUrl" h)
         _ -> (Nothing)
 
 extractXmlUrlsFromOpmlString :: String -> [Maybe String]
 extractXmlUrlsFromOpmlString c =
-  let tags = Prelude.filter (isTagOpenName "outline") (parseTags c)
+  let tags = Prelude.filter (isTagOpenName "outline") (parseTags (pack c))
    in Prelude.map extractXmlUrl tags
 
 chunksOf :: Int -> [a] -> [[a]]
@@ -214,7 +214,7 @@ parseURL url = case parseURI url of
   Just uri -> (if uriScheme uri `Prelude.elem` ["http:", "https:"] then Just url else Nothing)
   Nothing -> Nothing
 
-extractRssLinkTag :: [Tag String] -> [Tag String]
+extractRssLinkTag :: [Tag Text] -> [Tag Text]
 extractRssLinkTag = Prelude.filter (\t -> isRssLink t || isAtomLink t)
  where
   isRssLink (TagOpen "link" attrs) = fromAttrib "type" (TagOpen "link" attrs) == "application/rss+xml"
@@ -225,10 +225,10 @@ extractRssLinkTag = Prelude.filter (\t -> isRssLink t || isAtomLink t)
 getFeedUrlFromWebsite :: String -> IO (Maybe String)
 getFeedUrlFromWebsite url = do
   putStrLn $ "Getting contents of: " <> url
-  contents <- fetchUrl url >>= pure . (unpack . decodeUtf8)
+  contents <- fetchUrl url >>= pure . decodeUtf8
   let tags = extractRssLinkTag $ parseTags contents
   pure $ case tags of
-    tag : _ -> Just $ fromAttrib "href" tag
+    tag : _ -> Just $ unpack $ fromAttrib "href" tag
     _ -> Nothing
 
 getYtRssFeeds :: [String] -> IO [String]

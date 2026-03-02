@@ -135,7 +135,7 @@ startServer port = do
               runApiFn
                 (errWithStatus status400)
                 (\_ -> status status204)
-                $ withResource pool (\conn -> concurrently_ (updateAllFeeds conn) (pure ()))
+                $ concurrently_ (updateAllFeeds pool) (pure ())
             (Feeds, Import) -> do
               opml <- parseRequest reqData :: ActionM String
               runApiFn

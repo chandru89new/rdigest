@@ -10,6 +10,7 @@
 module Main where
 
 import CLI
+import Control.Concurrent.Async (concurrently_)
 import Control.Monad (forM_, unless)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Trans.Reader (ask)
@@ -49,10 +50,11 @@ main' command =
       case url of
         Just _url -> do
           runAppM $ do
+            Config{..} <- ask
             res <- insertFeed' _url
             liftIO $ unless (null res) $ do
               putStrLn $ "I have added the feed: " ++ link ++ "."
-            liftIO $ processFeeds res
+            liftIO $ processFeeds connPool res
         Nothing -> putStrLn "I am not able to parse the URL. Please provide a valid URL."
     RemoveFeed url -> runAppM $ do
       input <- liftIO $ userConfirmation "This will remove the feed and all the posts associated with it."
@@ -67,6 +69,7 @@ main' command =
     ShowVersion -> putStrLn ("rdigest v" ++ showVersion version)
     ShowHelp -> putStrLn progHelp
     UpdateFeeds -> runAppM updateAllFeedsM
+    UpdateFeed url -> runAppM (updateFeed url)
     StartServer port -> do
       startServer (fromMaybe 5500 port)
     ShowDigest n -> do
@@ -119,7 +122,9 @@ getCommand = do
       ("add" : url : _) -> AddFeed url
       ("remove" : url : _) -> RemoveFeed url
       ("list" : _) -> ListFeeds
-      ["update"] -> UpdateFeeds
+      ("update" : urest) -> case urest of
+        [] -> UpdateFeeds
+        (u : _) -> UpdateFeed u
       _ -> InvalidCommand
     ("digest" : rest) -> case rest of
       [] -> ShowDigest (Just 1)

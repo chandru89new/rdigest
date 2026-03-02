@@ -30,6 +30,7 @@ data Command
   | ShowHelp
   | StartServer (Maybe Int)
   | UpdateFeeds
+  | UpdateFeed String
   | ShowDigest (Maybe Int)
   | UpdateApp (Maybe String)
   | InvalidCommand

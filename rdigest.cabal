@@ -39,6 +39,7 @@ executable rdigest
     other-modules:     Paths_rdigest, Server, Types, Utils, DB, CLI
     -- other-extensions:
     build-depends:      base,
+                        deepseq,
                         tagsoup,
                         text,
                         http-conduit,
@@ -60,4 +61,4 @@ executable rdigest
                         unliftio
     hs-source-dirs:   app
     default-language: Haskell2010
-    ghc-options: -Wall -Wincomplete-patterns -threaded "-with-rtsopts=-xn -N"
+    ghc-options: -Wall -Wincomplete-patterns -threaded "-with-rtsopts=-N"

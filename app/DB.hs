@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -14,7 +15,6 @@
 module DB where
 
 import Control.Concurrent (MVar, newMVar, putMVar, takeMVar)
-import Control.Concurrent.Async (mapConcurrently_)
 import Control.Exception.Base
 import Control.Monad
 import Control.Monad.IO.Class
@@ -31,6 +31,7 @@ import Data.Pool
 import Data.String (IsString (fromString))
 import Data.Time
 import Database.SQLite.Simple
+import GHC.MVar (MVar (MVar))
 import Text.StringLike (StringLike (toString))
 import Types
 import UnliftIO (pooledForConcurrentlyN_)
@@ -140,29 +141,36 @@ queryToCheckIfItemExists = fromString "select link, title, updated from feed_ite
 insertFeedQuery :: Query
 insertFeedQuery = fromString "INSERT INTO feed_items (title, link, updated, feed_id) VALUES (?, ?, ?, ?);" :: Query
 
-processFeed :: (Int, URL) -> MVar () -> AppM ()
-processFeed (feedId, url) mvar = do
-  Config{..} <- ask
+processFeed :: Pool Connection -> (Int, URL) -> MVar () -> IO ()
+processFeed connPool (feedId, url) mvar = do
   liftIO $ putStrLn $ "Processing: " ++ url
   liftIO $ withResource connPool $ \conn -> do
     _ <- setPragmas conn
     feedIdExists <- query' conn (fromString "SELECT id FROM feeds where id = ?;") (Only feedId) :: IO [FeedId]
     when (null feedIdExists) $ throw $ DatabaseError "You have to first add this feed to your database. Try `rdigest add <url>`."
     contents <- fetchUrl url
-    unwrappedFeedItems <- evaluate (extractFeedItems contents) >>= (pure . fromMaybe [])
+    putStrLn $ show contents
+    !unwrappedFeedItems <- evaluate (extractFeedItems contents) >>= (pure . fromMaybe [])
+    when (feedId == 605) $ do
+      putStrLn (">>> " ++ url ++ show unwrappedFeedItems)
     when (null unwrappedFeedItems) $ do
       putStrLn $ "I couldn't find anything on: " ++ url ++ "."
     takeMVar mvar
     res <- (try' $ doInserts conn unwrappedFeedItems)
     putMVar mvar ()
     when ((not . null) unwrappedFeedItems && isRight res) $ do
+      let (discovered, added) = fromRight (0, 0) res
       putStrLn $ "Finished processing " ++ url ++ "."
-      putStrLn $ "Discovered: " ++ show (length unwrappedFeedItems) ++ " posts."
-      putStrLn $ "Added: " ++ show (sum $ fromRight [] res) ++ " posts (duplicates are ignored)."
+      putStrLn $ "Discovered: " ++ show discovered ++ " posts."
+      putStrLn $ "Added: " ++ show added ++ " posts (duplicates are ignored)."
     putStrLn "-----"
  where
-  doInserts :: Connection -> [FeedItem] -> IO [Int]
-  doInserts conn = mapM (handleInsert conn)
+  doInserts :: Connection -> [FeedItem] -> IO (Int, Int)
+  doInserts conn = foldM go (0, 0)
+   where
+    go (!total, !added) item = do
+      n <- handleInsert conn item
+      pure (total + 1, added + n)
 
   handleInsert :: Connection -> FeedItem -> IO Int
   handleInsert conn feedItem = do
@@ -170,15 +178,15 @@ processFeed (feedId, url) mvar = do
     when (isLeft res) $ print (fromLeft (DatabaseError "I ran into an error when trying to save a feed to the database.") res)
     pure $ either (const 0) (\r -> if isJust r then 1 else 0) res
 
-processFeeds :: [(Int, URL)] -> IO ()
-processFeeds urls = do
+processFeeds :: Pool Connection -> [(Int, URL)] -> IO ()
+processFeeds pool urls = do
   mvar <- newMVar ()
   pooledForConcurrentlyN_
     5
     urls
     ( \url ->
         do
-          res <- try' $ runAppM $ processFeed url mvar
+          res <- try' $ processFeed pool url mvar
           case res of
             Left e -> showAppError e
             Right _ -> pure ()
@@ -186,14 +194,26 @@ processFeeds urls = do
 
 updateAllFeedsM :: AppM ()
 updateAllFeedsM = do
+  Config{..} <- ask
   urls <- getFeedUrlsFromDB
-  liftIO $ processFeeds urls
+  liftIO $ processFeeds connPool urls
 
-updateAllFeeds :: Connection -> IO ()
-updateAllFeeds conn = do
+updateAllFeeds :: Pool Connection -> IO ()
+updateAllFeeds pool = withResource pool $ \conn -> do
   res <- query_' conn selectUrlFromFeeds :: IO [(Int, String)]
-  _ <- processFeeds res
+  _ <- processFeeds pool res
   pure ()
+
+updateFeed :: URL -> AppM ()
+updateFeed url = do
+  Config{..} <- ask
+  liftIO $ withResource connPool $ \conn -> do
+    res <- query' conn ("select id, url from feeds where url = ?") (Only url) :: IO [(Int, URL)]
+    case res of
+      [] -> throw $ DatabaseError "I couldn't find that feed. Maybe you haven't added it yet?"
+      (h : _) -> do
+        mvar <- newMVar ()
+        processFeed connPool h mvar
 
 insertFeedItem :: Connection -> (Int, FeedItem) -> IO (Maybe FeedItem)
 insertFeedItem conn (feedId, feedItem@FeedItem{..}) = do
