@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.4.2
+
+- Update user-agent to fix feed extraction from Reddit.
+
 ## v0.4.1
 
 - Import/export feeds via CLI.
