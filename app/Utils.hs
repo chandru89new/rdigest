@@ -38,7 +38,7 @@ getDBFile = (++ "/rdigest.db")
 fetchUrl :: String -> IO BS.ByteString
 fetchUrl url' = failWith FetchError $ do
   req <- parseRequest url'
-  let withHeader = setRequestHeader (mk $ BS.pack "User-Agent") [BS.pack "Mozilla/5.0"] req
+  let withHeader = setRequestHeader ("User-Agent") ["Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36"] req
   httpBS withHeader >>= pure . getResponseBody
 
 failWith :: (String -> AppError) -> IO a -> IO a
