@@ -149,8 +149,6 @@ processFeed connPool (feedId, url) mvar = do
     when (null feedIdExists) $ throw $ DatabaseError "You have to first add this feed to your database. Try `rdigest add <url>`."
     contents <- fetchUrl url
     !unwrappedFeedItems <- evaluate (extractFeedItems contents) >>= (pure . fromMaybe [])
-    when (feedId == 605) $ do
-      putStrLn (">>> " ++ url ++ show unwrappedFeedItems)
     when (null unwrappedFeedItems) $ do
       putStrLn $ "I couldn't find anything on: " ++ url ++ "."
     takeMVar mvar
