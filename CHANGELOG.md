@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.4.3
+
+- Erroneaous inputs exit with non-zero exit code.
+
 ## v0.4.2
 
 - Update user-agent to fix feed extraction from Reddit.
