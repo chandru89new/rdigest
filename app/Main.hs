@@ -28,6 +28,7 @@ import Text.Read (readMaybe)
 import Text.StringLike (StringLike (toString), fromString)
 import Types
 import Utils
+import System.Exit (exitFailure)
 
 -- MAIN
 
@@ -55,7 +56,9 @@ main' command =
             liftIO $ unless (null res) $ do
               putStrLn $ "I have added the feed: " ++ link ++ "."
             liftIO $ processFeeds connPool res
-        Nothing -> putStrLn "I am not able to parse the URL. Please provide a valid URL."
+        Nothing -> do
+            putStrLn "I am not able to parse the URL. Please provide a valid URL."
+            exitFailure
     RemoveFeed url -> runAppM $ do
       input <- liftIO $ userConfirmation "This will remove the feed and all the posts associated with it."
       if input
@@ -98,8 +101,12 @@ main' command =
     UpdateApp option -> case option of
       Just "weburl" -> do
         runAppM updateWebUrlInFeedsTable
-      Just _ -> putStrLn "I didnt quite understand that command. Try `rdigest help`?"
-      Nothing -> putStrLn "I need a command with `update` to know what to do. eg. `rdigest update weburl`"
+      Just _ -> do
+        putStrLn "I didnt quite understand that command. Try `rdigest help`?"
+        exitFailure
+      Nothing -> do
+        putStrLn "I need a command with `update` to know what to do. eg. `rdigest update weburl`"
+        exitFailure
     ExportOpml -> do
       runAppM $ do
         Config{..} <- ask
@@ -113,6 +120,7 @@ main' command =
       liftIO $ putStrLn "Done! To get the latest from the feeds, try `rdigest feeds udpate`."
     InvalidCommand str -> do
       putStrLn str
+      exitFailure
 
 -- FUNCTIONS
 progHelp :: String
