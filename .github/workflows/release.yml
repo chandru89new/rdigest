@@ -40,7 +40,7 @@ jobs:
           ./scripts/build_linux.sh
 
       - name: Build on macOS
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-15'
         run: |
           ./scripts/build_macos.sh
 
