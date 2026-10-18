@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.4.4
+
+- Minor UI change to make header-nav sticky.
+
 ## v0.4.3
 
 - Erroneaous inputs exit with non-zero exit code.

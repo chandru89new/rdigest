@@ -422,7 +422,6 @@ subscriptions _ =
 
 -- VIEWS
 
-
 viewFeedLinks : Model -> Html Msg
 viewFeedLinks model =
     let
@@ -549,7 +548,7 @@ viewLink { link, title, updated } =
         [ span [ class "flex flex-col gap-y-0.5" ]
             [ a [ href link, target "_blank" ] [ text (Maybe.withDefault link title) ]
             , span [ class "text-xs opacity-70 flex items-center gap-x-2.5" ]
-                [ a [ class className, href ("/digests/" ++ Maybe.withDefault "" (Maybe.map toFriendlyDate updated)) ] [ text (Maybe.withDefault "" (Maybe.map toFriendlyDate updated)) ]
+                [ a [ class className, href ("/digests/" ++ Maybe.withDefault "" (Maybe.map Date.toIsoString updated)) ] [ text (Maybe.withDefault "" (Maybe.map toFriendlyDate updated)) ]
                 , span [ class className ] [ text "•" ]
                 , span [ class "text-xs opacity-70" ]
                     [ text <| showUrl link
@@ -776,18 +775,19 @@ view model =
     in
     { title = title
     , body =
-        [ div [ id "app", class "flex flex-col gap-y-4" ]
-            [ h1 [ class "flex items-center gap-x-4" ]
-                [ a [ href "/" ] [ text "rdigest — " ]
-                , div [ class "flex gap-x-3" ]
-                    [ a [ href "/digests" ] [ text "(digests)" ]
-                    , span [] [ text <| "•" ]
-                    , a [ href "/feeds" ] [ text "(feeds)" ]
-                    , span [] [ text <| "•" ]
-                    , span [ onClick RefreshFeed, class "text-green-500 cursor-pointer" ] [ text "(refresh)" ]
+        [ div [ id "app", class "flex flex-col gap-y-4 relative max-w-240 m-auto px-4 lg:px-0 pb-4" ]
+            [ h1 [ class "sticky top-0 z-[100] py-4 bg-white border-b border-slate-300 flex flex-col gap-y-4" ]
+                [ div [class "flex items-center gap-x-4" ]
+                    [ a [ href "/" ] [ text "rdigest — " ]
+                    , div [ class "flex gap-x-3" ]
+                        [ a [ href "/digests" ] [ text "(digests)" ]
+                        , span [] [ text <| "•" ]
+                        , a [ href "/feeds" ] [ text "(feeds)" ]
+                        , span [] [ text <| "•" ]
+                        , span [ onClick RefreshFeed, class "text-green-500 cursor-pointer" ] [ text "(refresh)" ]
+                        ]
                     ]
                 ]
-            , hr [ class "border-0 h-[1px] bg-slate-400" ] []
             , div [ class "app-content" ]
                 [ case model.currPage of
                     DashboardPage ->
