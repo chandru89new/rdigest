@@ -16,12 +16,11 @@ import Control.Exception
 import Control.Monad.Trans.Reader
 import qualified Data.ByteString.Char8 as BS
 import Data.ByteString.Lazy (ByteString)
-import Data.CaseInsensitive
 import qualified Data.Map as Map
 import Data.Maybe
 import Data.Pool (defaultPoolConfig, destroyAllResources, newPool)
 import Data.String (IsString (fromString))
-import Data.Text
+import Data.Text hiding (show)
 import Data.Text.Encoding
 import Data.Time
 import Database.SQLite.Simple

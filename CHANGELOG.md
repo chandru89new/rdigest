@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.4.5
+
+- Fix ambiguity in `show` import.
+
 ## v0.4.4
 
 - Minor UI change to make header-nav sticky.

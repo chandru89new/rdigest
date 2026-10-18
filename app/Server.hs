@@ -26,8 +26,8 @@ import qualified Data.ByteString.Char8 as BS
 import Data.FileEmbed
 import Data.Maybe
 import Data.Pool
-import Data.Text
-import Data.Text.Lazy hiding (Text, isSuffixOf, pack)
+import Data.Text hiding (show)
+import Data.Text.Lazy hiding (Text, isSuffixOf, pack, show)
 import Database.SQLite.Simple
 import Network.HTTP.Types.Status
 import Types
