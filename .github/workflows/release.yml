@@ -9,11 +9,11 @@ on:
       ghc_version:
         description: "GHC version to install"
         required: true
-        default: "9.4.8"
+        default: "9.14.1"
       cabal_version:
         description: "Cabal version to install"
         required: true
-        default: "3.10.3.0"
+        default: "3.18.1.0"
 
 jobs:
   build:
@@ -24,7 +24,7 @@ jobs:
       CABAL_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.cabal_version || '3.10.3.0' }}
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-15, ubuntu-latest]
 
     steps:
       - uses: actions/checkout@v3
