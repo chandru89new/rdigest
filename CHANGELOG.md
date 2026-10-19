@@ -1,5 +1,13 @@
 # rdigest - Changelog
 
+## v0.4.7
+
+- UI improvements.
+
+## v0.4.6
+
+- Add count to digests list.
+
 ## v0.4.5
 
 - Fix ambiguity in `show` import.

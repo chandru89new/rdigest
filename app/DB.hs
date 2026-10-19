@@ -113,11 +113,11 @@ getDigestsFull conn PageParams{..} = do
     f (date, xs) = Digest date (map g xs)
     g (link, title, feedId, feedTitle, feedUrl) = DigestLink link title feedId feedTitle feedUrl
 
-getDigests :: Connection -> PageParams -> IO [Day]
+getDigests :: Connection -> PageParams -> IO [(Day,Int)]
 getDigests conn PageParams{..} = do
-  let q1 = "SELECT distinct updated from feed_items ORDER BY updated DESC limit ? offset ?;"
-  res <- query' conn (fromString q1) (pageLimit, pageOffset) :: IO [Only Day]
-  pure $ map fromOnly res
+  let q1 = "SELECT date(updated) as updated, count(title) as total from feed_items GROUP BY updated ORDER BY updated DESC limit ? offset ?;"
+  res <- query' conn (fromString q1) (pageLimit, pageOffset) :: IO [(Day, Int)]
+  pure $ res
 
 getFeedUrlsFromDB :: AppM [(Int, URL)]
 getFeedUrlsFromDB = do

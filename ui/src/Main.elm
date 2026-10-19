@@ -17,6 +17,7 @@ import Task
 import Time
 import Url exposing (Url)
 import Url.Parser exposing ((</>), parse)
+import Browser.Dom
 
 
 
@@ -47,12 +48,14 @@ type alias Model =
     , feeds : RemotePaginatedData String (List Feed)
     , digest : RemoteData String Digest
     , dashboardDigest : RemoteData String Digest
-    , digests : RemotePaginatedData String (List Date.Date)
+    , digests : RemotePaginatedData String (List (Date.Date, Int))
     , currPage : Page
     , digestSearchTerm : String
     , currFeed : RemoteData String Feed
     , feedLinks : RemotePaginatedData String (List FeedLink)
     , today : Maybe Date.Date -- if Nothing, date is not set.
+    , adminMode : Bool
+    , detailsOpen : Bool
     }
 
 
@@ -73,7 +76,7 @@ type Msg
     | GotFeedsList (Result String ( List Feed, PageParams, Int ))
     | GotDigest (Result String Digest)
     | GetDigests PageParams
-    | GotDigests (Result String ( List Date.Date, PageParams, Int ))
+    | GotDigests (Result String ( List (Date.Date, Int), PageParams, Int ))
     | GetFeeds PageParams
     | UpdateDigestSearchTerm String
     | RefreshFeed
@@ -90,8 +93,9 @@ type Msg
     | GetToday
     | GotToday Date.Date
     | GotDashboardDigest (Result String Digest)
-    | ToggleDetails
     | BatchMsgs (List Msg)
+    | ToggleAdminMode Bool
+    | ToggleDetails Bool
     | NoOp
 
 
@@ -172,6 +176,8 @@ init () url key =
             , feedLinks = Loading_ { limit = 1000 }
             , currFeed = Loading
             , today = Nothing
+            , adminMode = False
+            , detailsOpen = True
             }
     in
     ( initModel, Cmd.batch [ Task.perform (\_ -> GetToday) (Task.succeed 1), pageCmdsToRun initModel <| parseUrl url ] )
@@ -187,6 +193,12 @@ update msg model =
         NoOp ->
             ( model, Cmd.none )
 
+        ToggleDetails b ->
+                ({ model | detailsOpen = b }, Cmd.none)
+
+        ToggleAdminMode b ->
+            ({ model | adminMode = b }, Cmd.none)
+
         BatchMsgs msgs ->
             case msgs of
                 [] ->
@@ -198,9 +210,6 @@ update msg model =
                             update h model
                     in
                     ( m, Cmd.batch [ cmd, Task.perform (\_ -> BatchMsgs rest) (Task.succeed 1) ] )
-
-        ToggleDetails ->
-            ( model, toggleDetails () )
 
         GotDashboardDigest res ->
             ( { model | dashboardDigest = resultToRemoteData res }, Cmd.none )
@@ -347,7 +356,7 @@ update msg model =
                     { model | url = url, feeds = feeds, digests = digests, currPage = parseUrl url }
             in
             ( newModel
-            , pageCmdsToRun newModel page
+            , Cmd.batch [ pageCmdsToRun newModel page, scrollTop, unsetDetailsOpenToggle ]
             )
 
         UpdateDigestSearchTerm str ->
@@ -487,9 +496,9 @@ viewFeedLinks model =
         ]
 
 
-viewLinkGroup : ( ( String, String ), List LinkItem ) -> Html Msg
-viewLinkGroup ( group, links ) =
-    details [ class "p-4 border rounded-lg border-slate-200", property "open" (Encode.bool True) ]
+viewLinkGroup : Bool -> ( ( String, String ), List LinkItem ) -> Html Msg
+viewLinkGroup detailsToggle ( group, links ) =
+    details [ class "p-4 border rounded-lg border-slate-200", property "open" (Encode.bool detailsToggle) ]
         [ summary [ class "cursor-pointer font-bold" ]
             [ text <| String.join "" [ Tuple.second group, " (", fromInt (List.length links), ")" ]
             ]
@@ -497,8 +506,8 @@ viewLinkGroup ( group, links ) =
         ]
 
 
-viewLatestDigest : String -> RemoteData String Digest -> Html Msg
-viewLatestDigest searchTerm r =
+viewLatestDigest : String -> Bool -> RemoteData String Digest -> Html Msg
+viewLatestDigest searchTerm detailsOpen r =
     case r of
         Loading ->
             div [] [ text "Loading..." ]
@@ -531,7 +540,7 @@ viewLatestDigest searchTerm r =
                             digest.links
                         )
             in
-            div [ class "flex flex-col gap-y-2.5" ] [ viewDigest digestFiltered ]
+            div [ class "flex flex-col gap-y-2.5" ] [ viewDigest detailsOpen digestFiltered ]
 
 
 viewLink : { a | link : String, title : Maybe String, updated : Maybe Date.Date } -> Html Msg
@@ -550,7 +559,7 @@ viewLink { link, title, updated } =
             , span [ class "text-xs opacity-70 flex items-center gap-x-2.5" ]
                 [ a [ class className, href ("/digests/" ++ Maybe.withDefault "" (Maybe.map Date.toIsoString updated)) ] [ text (Maybe.withDefault "" (Maybe.map toFriendlyDate updated)) ]
                 , span [ class className ] [ text "•" ]
-                , span [ class "text-xs opacity-70" ]
+                , span [ class "text-xs opacity-70 break-all" ]
                     [ text <| showUrl link
                     ]
                 ]
@@ -571,7 +580,7 @@ viewDigestsList model =
             if List.length ls > 0 then
                 div [ class "flex flex-col gap-y-3" ] <|
                     (List.indexedMap
-                        (\i s ->
+                        (\i (s,c) ->
                             let
                                 tag =
                                     Maybe.andThen
@@ -589,7 +598,7 @@ viewDigestsList model =
                             in
                             a
                                 [ class "border border-slate-200 rounded-lg p-3 flex justify-between items-center", href (String.join "/" [ "/digests", dateToString s ]) ]
-                                [ text <| toFriendlyDate s
+                                [ text <| toFriendlyDate s ++ " (" ++ fromInt c ++ ")"
                                 , span
                                     [ class
                                         ([ "text-xs uppercase rounded-md text-black"
@@ -628,8 +637,8 @@ viewDigestsList model =
                     ]
 
 
-viewDigest : Digest -> Html Msg
-viewDigest { date, links } =
+viewDigest : Bool -> Digest -> Html Msg
+viewDigest detailsOpen { date, links } =
     let
         grouped =
             groupDigestLinksByFeedUrl links
@@ -638,11 +647,11 @@ viewDigest { date, links } =
         [ div [ class "flex items-center justify-between" ]
             [ h3 []
                 [ text <| String.join "" [ toFriendlyDate date, " ", "(", fromInt <| List.length links, ")" ] ]
-            , span [ class "cursor-pointer text-blue-600", onClick ToggleDetails ] [ text "Toggle expand/collapse" ]
+            , span [ class "cursor-pointer text-blue-600", onClick (ToggleDetails (not detailsOpen)) ] [ text "Toggle expand/collapse" ]
             ]
         , input [ class "p-2 text-sm border rounded-md border-slate-200 w-full", placeholder "Search in digest...", onInput UpdateDigestSearchTerm ] []
         , div [ class "grid grid-cols-1 lg:grid-cols-1 gap-4" ] <|
-            List.map viewLinkGroup (List.reverse <| List.sortBy (\( _, ls ) -> List.length ls) <| Dict.toList grouped)
+            List.map (viewLinkGroup detailsOpen) (List.reverse <| List.sortBy (\( _, ls ) -> List.length ls) <| Dict.toList grouped)
         ]
 
 
@@ -660,8 +669,8 @@ viewFeedsList model =
                 noFeeds =
                     List.length feeds == 0
             in
-            div [ class "flex flex-col gap-y-3" ]
-                [ div [ class "flex gap-x-3" ]
+            div [ class "flex flex-col gap-y-2" ]
+                [ div [ class ("flex gap-x-3 " ++ if model.adminMode then "" else "hidden") ]
                     [ button [ onClick (ShowPrompt "Enter feed URL:" (Encode.object [ ( "key", Encode.string "addFeed" ), ( "defaultValue", Encode.string "" ) ])), class "" ]
                         [ text "+ Add RSS feed" ]
                     , button [ onClick TriggerFileUpload, class "" ]
@@ -669,6 +678,9 @@ viewFeedsList model =
                     , button [ class "" ]
                         [ a [ href "/export-opml", target "_blank" ] [ text "Export OPML" ] ]
                     ]
+                , div [class (if not model.adminMode then "" else "hidden")] [
+                    a [href "#", class "cursor-pointer", onClick (ToggleAdminMode True)] [text "Admin"]
+                ]
                 , div
                     [ class
                         ("opacity-60 mt-6 "
@@ -711,7 +723,7 @@ viewFeedsList model =
                                         ]
                                         [ text "Edit name" ]
                                     , span [ class "hidden" ] [ text "•" ]
-                                    , span [ class "cursor-pointer text-xs text-red-500", onClick <| ShowConfirm "Sure? This will delete the feed and the links from it. You can't undo it." (Encode.object [ ( "key", Encode.string "deleteFeed" ), ( "value", Encode.string f.url ) ]) ] [ text "Delete" ]
+                                    , span [ class ("cursor-pointer text-xs text-red-500 " ++ if model.adminMode then "" else "hidden"), onClick <| ShowConfirm "Sure? This will delete the feed and the links from it. You can't undo it." (Encode.object [ ( "key", Encode.string "deleteFeed" ), ( "value", Encode.string f.url ) ]) ] [ text "Delete" ]
                                     ]
                                 ]
                         )
@@ -791,7 +803,7 @@ view model =
             , div [ class "app-content" ]
                 [ case model.currPage of
                     DashboardPage ->
-                        viewLatestDigest model.digestSearchTerm model.dashboardDigest
+                        viewLatestDigest model.digestSearchTerm model.detailsOpen model.dashboardDigest
 
                     FeedsPage Nothing ->
                         div [] [ viewFeedsList model ]
@@ -805,7 +817,7 @@ view model =
                                 viewDigestsList model
 
                             Just _ ->
-                                viewLatestDigest model.digestSearchTerm model.digest
+                                viewLatestDigest model.digestSearchTerm model.detailsOpen model.digest
                 ]
             ]
         ]
@@ -815,6 +827,11 @@ view model =
 
 -- HELPERS
 
+unsetDetailsOpenToggle : Cmd Msg
+unsetDetailsOpenToggle = Task.perform (\_ -> ToggleDetails True) (Task.succeed 1)
+
+scrollTop : Cmd Msg
+scrollTop = Task.perform (\_ -> NoOp) (Browser.Dom.setViewport 0 0)
 
 resultToRemoteData : Result e a -> RemoteData e a
 resultToRemoteData res =
@@ -871,17 +888,21 @@ getPageParams r =
 
 pageCmdsToRun : Model -> Page -> Cmd Msg
 pageCmdsToRun model page =
+    let
+        resetAdminMode = Task.perform (\_ -> ToggleAdminMode False) (Task.succeed 1)
+    in
     case page of
         DashboardPage ->
-            Cmd.batch [ Task.perform (\_ -> GetToday) (Task.succeed 1) ]
+            Cmd.batch [ Task.perform (\_ -> GetToday) (Task.succeed 1), resetAdminMode ]
 
         FeedsPage Nothing ->
-            Cmd.batch [ getFeedsList model { limit = Basics.clamp 100 10000 (getPageParams model.digests).limit } ]
+            Cmd.batch [ getFeedsList model { limit = Basics.clamp 100 10000 (getPageParams model.digests).limit }, resetAdminMode ]
 
         FeedsPage (Just id) ->
             Cmd.batch
                 [ getLinksForFeed model id
                 , getFeed model id
+                , resetAdminMode
                 ]
 
         DigestsPage d ->
@@ -891,6 +912,7 @@ pageCmdsToRun model page =
 
                   else
                     getDigestForDate model (Maybe.map (\a -> toDateDefault a) d)
+                , resetAdminMode
                 ]
 
 
@@ -1004,6 +1026,12 @@ makePostBody resource action requestData =
 
 -- DECODERS
 
+digestDateCountDecoder : Decode.Decoder (Date.Date, Int)
+digestDateCountDecoder =
+    Decode.map2
+        Tuple.pair
+        (Decode.map toDateDefault (Decode.index 0 Decode.string))
+        (Decode.index 1 Decode.int)
 
 feedLinkDecoder : Decode.Decoder FeedLink
 feedLinkDecoder =
@@ -1116,7 +1144,7 @@ getLatestDigest model =
 
         latestDigestDate =
             Maybe.andThen
-                (\today -> List.head (List.filter (fn today) ds))
+                (\today -> List.head (List.filter (fn today) (List.map Tuple.first ds)))
                 model.today
 
         fn t d =
@@ -1347,11 +1375,7 @@ getDigests model pageParams =
                 )
                 (Decode.map3 (\a b c -> ( a, b, c ))
                     (Decode.field "digests" <|
-                        Decode.list
-                            (Decode.map
-                                toDateDefault
-                                Decode.string
-                            )
+                        Decode.list digestDateCountDecoder
                     )
                     (Decode.succeed pageParams)
                     (Decode.field "total" Decode.int)
