@@ -173,6 +173,17 @@ startServer port = do
                     Just v' -> json $ toJSON v'
                 )
                 $ withResource pool (flip getDigestForDate date)
+            (Digests, MarkAsSeen) -> do
+              date <- if (isJust reqData) then parseRequest reqData else pure Nothing :: ActionM (Maybe String)
+              case date of
+                Nothing -> errWithStatus status400 (ArgError "Need a digest date.")
+                Just d -> runApiFn
+                  (errWithStatus status400)
+                  ( \v -> case v of
+                      False -> errWithStatus status404 (DatabaseError "No digest found.")
+                      True -> status status204
+                  )
+                  $ withResource pool (\conn -> markAsSeen conn d)
             (Echo, _) -> json $ object ["request" .= show r]
             _ -> do
               status status400

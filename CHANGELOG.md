@@ -1,5 +1,10 @@
 # rdigest - Changelog
 
+## v0.5.0
+
+- Add 'seen_status' column to feed_items table.
+- Add 'mark as seen' feature so feed items / links can be marked as seen/read.
+
 ## v0.4.7
 
 - UI improvements.

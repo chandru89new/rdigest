@@ -1,0 +1,1 @@
+ALTER TABLE feed_items ADD COLUMN seen_status INTEGER NOT NULL DEFAULT 0;

@@ -1,6 +1,7 @@
 port module Main exposing (main)
 
 import Browser
+import Browser.Dom
 import Browser.Navigation as Nav
 import Date
 import Dict exposing (Dict)
@@ -17,7 +18,6 @@ import Task
 import Time
 import Url exposing (Url)
 import Url.Parser exposing ((</>), parse)
-import Browser.Dom
 
 
 
@@ -48,7 +48,7 @@ type alias Model =
     , feeds : RemotePaginatedData String (List Feed)
     , digest : RemoteData String Digest
     , dashboardDigest : RemoteData String Digest
-    , digests : RemotePaginatedData String (List (Date.Date, Int))
+    , digests : RemotePaginatedData String (List ( Date.Date, Int ))
     , currPage : Page
     , digestSearchTerm : String
     , currFeed : RemoteData String Feed
@@ -76,7 +76,7 @@ type Msg
     | GotFeedsList (Result String ( List Feed, PageParams, Int ))
     | GotDigest (Result String Digest)
     | GetDigests PageParams
-    | GotDigests (Result String ( List (Date.Date, Int), PageParams, Int ))
+    | GotDigests (Result String ( List ( Date.Date, Int ), PageParams, Int ))
     | GetFeeds PageParams
     | UpdateDigestSearchTerm String
     | RefreshFeed
@@ -93,7 +93,6 @@ type Msg
     | GetToday
     | GotToday Date.Date
     | GotDashboardDigest (Result String Digest)
-    | BatchMsgs (List Msg)
     | ToggleAdminMode Bool
     | ToggleDetails Bool
     | NoOp
@@ -131,6 +130,7 @@ type alias LinkItem =
     , feedTitle : Maybe String
     , feedUrl : String
     , updated : Maybe Date.Date
+    , seen : Bool
     }
 
 
@@ -144,6 +144,7 @@ type alias FeedLink =
     { url : String
     , title : Maybe String
     , updated : Date.Date
+    , seen : Bool
     }
 
 
@@ -194,22 +195,10 @@ update msg model =
             ( model, Cmd.none )
 
         ToggleDetails b ->
-                ({ model | detailsOpen = b }, Cmd.none)
+            ( { model | detailsOpen = b }, Cmd.none )
 
         ToggleAdminMode b ->
-            ({ model | adminMode = b }, Cmd.none)
-
-        BatchMsgs msgs ->
-            case msgs of
-                [] ->
-                    ( model, Cmd.none )
-
-                h :: rest ->
-                    let
-                        ( m, cmd ) =
-                            update h model
-                    in
-                    ( m, Cmd.batch [ cmd, Task.perform (\_ -> BatchMsgs rest) (Task.succeed 1) ] )
+            ( { model | adminMode = b }, Cmd.none )
 
         GotDashboardDigest res ->
             ( { model | dashboardDigest = resultToRemoteData res }, Cmd.none )
@@ -275,6 +264,18 @@ update msg model =
                 ( "importFeeds", contents ) ->
                     ( model, addFeedsFromOpml model contents )
 
+                ( "markAsSeen", dateString ) ->
+                    let
+                        decodeResult =
+                            Decode.decodeValue Decode.string dateString
+                    in
+                    case decodeResult of
+                        Err _ ->
+                            ( model, Cmd.none )
+
+                        Ok ds ->
+                            ( model, markAsSeen model ds )
+
                 _ ->
                     ( model, Cmd.none )
 
@@ -309,10 +310,7 @@ update msg model =
                     ( model
                     , showConfirm
                         ( "Ok. Are you sure you want to import the feeds?"
-                        , Encode.object
-                            [ ( "key", Encode.string "importFeeds" )
-                            , ( "value", Encode.string contents )
-                            ]
+                        , encodeKeyValue "importFeeds" contents Nothing
                         )
                     )
 
@@ -431,6 +429,7 @@ subscriptions _ =
 
 -- VIEWS
 
+
 viewFeedLinks : Model -> Html Msg
 viewFeedLinks model =
     let
@@ -476,7 +475,7 @@ viewFeedLinks model =
                         ]
                         (List.map
                             (\link ->
-                                viewLink { link = link.url, title = link.title, updated = Just link.updated }
+                                viewLink { link = link.url, title = link.title, updated = Just link.updated, seen = link.seen }
                             )
                             feedLinks
                         )
@@ -540,11 +539,16 @@ viewLatestDigest searchTerm detailsOpen r =
                             digest.links
                         )
             in
-            div [ class "flex flex-col gap-y-2.5" ] [ viewDigest detailsOpen digestFiltered ]
+            div [ class "flex flex-col gap-y-4" ]
+                [ div [ class "flex flex-col gap-y-2.5" ] [ viewDigest detailsOpen digestFiltered ]
+                , div [ class "flex items-center justify-center" ]
+                    [ a [ class "cursor-pointer", href "#", onClick (ShowConfirm "Mark all links in this digest as seen?" (encodeKeyValue "markAsSeen" (dateToString digestFiltered.date) Nothing)) ] [ text "Mark as seen" ]
+                    ]
+                ]
 
 
-viewLink : { a | link : String, title : Maybe String, updated : Maybe Date.Date } -> Html Msg
-viewLink { link, title, updated } =
+viewLink : { a | link : String, title : Maybe String, updated : Maybe Date.Date, seen : Bool } -> Html Msg
+viewLink { link, title, updated, seen } =
     let
         className =
             if updated == Nothing then
@@ -552,8 +556,15 @@ viewLink { link, title, updated } =
 
             else
                 ""
+
+        opacityClass =
+            if seen then
+                "opacity-30"
+
+            else
+                ""
     in
-    li []
+    li [ class opacityClass ]
         [ span [ class "flex flex-col gap-y-0.5" ]
             [ a [ href link, target "_blank" ] [ text (Maybe.withDefault link title) ]
             , span [ class "text-xs opacity-70 flex items-center gap-x-2.5" ]
@@ -580,7 +591,7 @@ viewDigestsList model =
             if List.length ls > 0 then
                 div [ class "flex flex-col gap-y-3" ] <|
                     (List.indexedMap
-                        (\i (s,c) ->
+                        (\i ( s, c ) ->
                             let
                                 tag =
                                     Maybe.andThen
@@ -670,17 +681,35 @@ viewFeedsList model =
                     List.length feeds == 0
             in
             div [ class "flex flex-col gap-y-2" ]
-                [ div [ class ("flex gap-x-3 " ++ if model.adminMode then "" else "hidden") ]
-                    [ button [ onClick (ShowPrompt "Enter feed URL:" (Encode.object [ ( "key", Encode.string "addFeed" ), ( "defaultValue", Encode.string "" ) ])), class "" ]
+                [ div
+                    [ class
+                        ("flex gap-x-3 "
+                            ++ (if model.adminMode then
+                                    ""
+
+                                else
+                                    "hidden"
+                               )
+                        )
+                    ]
+                    [ button [ onClick (ShowPrompt "Enter feed URL:" (encodeKeyValue "addFeed" "" <| Just "")), class "" ]
                         [ text "+ Add RSS feed" ]
                     , button [ onClick TriggerFileUpload, class "" ]
                         [ text "+ Import OPML" ]
                     , button [ class "" ]
                         [ a [ href "/export-opml", target "_blank" ] [ text "Export OPML" ] ]
                     ]
-                , div [class (if not model.adminMode then "" else "hidden")] [
-                    a [href "#", class "cursor-pointer", onClick (ToggleAdminMode True)] [text "Admin"]
-                ]
+                , div
+                    [ class
+                        (if not model.adminMode then
+                            ""
+
+                         else
+                            "hidden"
+                        )
+                    ]
+                    [ a [ href "#", class "cursor-pointer", onClick (ToggleAdminMode True) ] [ text "Admin" ]
+                    ]
                 , div
                     [ class
                         ("opacity-60 mt-6 "
@@ -714,16 +743,24 @@ viewFeedsList model =
                                         [ class "hidden cursor-pointer text-xs text-blue-600"
                                         , onClick
                                             (ShowPrompt "Change title to:"
-                                                (Encode.object
-                                                    [ ( "key", Encode.string "editTitle" )
-                                                    , ( "defaultValue", Maybe.withDefault f.url f.title |> Encode.string )
-                                                    ]
-                                                )
+                                                (encodeKeyValue "editTitle" "" <| (Just <| Maybe.withDefault f.url f.title))
                                             )
                                         ]
                                         [ text "Edit name" ]
                                     , span [ class "hidden" ] [ text "•" ]
-                                    , span [ class ("cursor-pointer text-xs text-red-500 " ++ if model.adminMode then "" else "hidden"), onClick <| ShowConfirm "Sure? This will delete the feed and the links from it. You can't undo it." (Encode.object [ ( "key", Encode.string "deleteFeed" ), ( "value", Encode.string f.url ) ]) ] [ text "Delete" ]
+                                    , span
+                                        [ class
+                                            ("cursor-pointer text-xs text-red-500 "
+                                                ++ (if model.adminMode then
+                                                        ""
+
+                                                    else
+                                                        "hidden"
+                                                   )
+                                            )
+                                        , onClick <| ShowConfirm "Sure? This will delete the feed and the links from it. You can't undo it." (encodeKeyValue "deleteFeed" f.url Nothing)
+                                        ]
+                                        [ text "Delete" ]
                                     ]
                                 ]
                         )
@@ -744,11 +781,7 @@ viewFeedsList model =
                             [ class "cursor-pointer text-blue-600 opacity-100"
                             , onClick <|
                                 ShowPrompt "Enter feed URL:"
-                                    (Encode.object
-                                        [ ( "key", Encode.string "addFeed" )
-                                        , ( "defaultValue", Encode.string "https://notes.druchan.com/feed.xml" )
-                                        ]
-                                    )
+                                    (encodeKeyValue "addFeed" "" (Just "https://notes.druchan.com/feed.xml"))
                             ]
                             [ text "click here" ]
                         , text " to add a sample feed real quick."
@@ -789,7 +822,7 @@ view model =
     , body =
         [ div [ id "app", class "flex flex-col gap-y-4 relative max-w-240 m-auto px-4 lg:px-0 pb-4" ]
             [ h1 [ class "sticky top-0 z-[100] py-4 bg-white border-b border-slate-300 flex flex-col gap-y-4" ]
-                [ div [class "flex items-center gap-x-4" ]
+                [ div [ class "flex items-center gap-x-4" ]
                     [ a [ href "/" ] [ text "rdigest — " ]
                     , div [ class "flex gap-x-3" ]
                         [ a [ href "/digests" ] [ text "(digests)" ]
@@ -827,11 +860,30 @@ view model =
 
 -- HELPERS
 
+
+encodeKeyValue : String -> String -> Maybe String -> Encode.Value
+encodeKeyValue key value defaultValue =
+    let
+        base =
+            [ ( "key", Encode.string key ), ( "value", Encode.string value ) ]
+    in
+    case defaultValue of
+        Nothing ->
+            Encode.object base
+
+        Just dv ->
+            Encode.object (( "defaultValue", Encode.string dv ) :: base)
+
+
 unsetDetailsOpenToggle : Cmd Msg
-unsetDetailsOpenToggle = Task.perform (\_ -> ToggleDetails True) (Task.succeed 1)
+unsetDetailsOpenToggle =
+    Task.perform (\_ -> ToggleDetails True) (Task.succeed 1)
+
 
 scrollTop : Cmd Msg
-scrollTop = Task.perform (\_ -> NoOp) (Browser.Dom.setViewport 0 0)
+scrollTop =
+    Task.perform (\_ -> NoOp) (Browser.Dom.setViewport 0 0)
+
 
 resultToRemoteData : Result e a -> RemoteData e a
 resultToRemoteData res =
@@ -889,7 +941,8 @@ getPageParams r =
 pageCmdsToRun : Model -> Page -> Cmd Msg
 pageCmdsToRun model page =
     let
-        resetAdminMode = Task.perform (\_ -> ToggleAdminMode False) (Task.succeed 1)
+        resetAdminMode =
+            Task.perform (\_ -> ToggleAdminMode False) (Task.succeed 1)
     in
     case page of
         DashboardPage ->
@@ -1026,12 +1079,14 @@ makePostBody resource action requestData =
 
 -- DECODERS
 
-digestDateCountDecoder : Decode.Decoder (Date.Date, Int)
+
+digestDateCountDecoder : Decode.Decoder ( Date.Date, Int )
 digestDateCountDecoder =
     Decode.map2
         Tuple.pair
         (Decode.map toDateDefault (Decode.index 0 Decode.string))
         (Decode.index 1 Decode.int)
+
 
 feedLinkDecoder : Decode.Decoder FeedLink
 feedLinkDecoder =
@@ -1045,7 +1100,7 @@ feedLinkDecoder =
         updatedDecoder =
             Decode.field "updated" Decode.string |> Decode.map toDateDefault
     in
-    Decode.map3 FeedLink urlDecoder titleDecoder updatedDecoder
+    Decode.map4 FeedLink urlDecoder titleDecoder updatedDecoder (Decode.field "seen" Decode.bool)
 
 
 feedDecoder : Decode.Decoder Feed
@@ -1117,18 +1172,28 @@ digestDecoder =
             Decode.field "links" (Decode.list linkDecoder)
 
         linkDecoder =
-            Decode.map5 (\l t fId fTitle fUrl -> { link = l, title = t, feedId = fId, feedTitle = fTitle, feedUrl = fUrl, updated = Nothing })
+            Decode.map6 (\l t fId fTitle fUrl seen -> { link = l, title = t, feedId = fId, feedTitle = fTitle, feedUrl = fUrl, updated = Nothing, seen = seen })
                 (Decode.field "link" Decode.string)
                 (Decode.field "title" (Decode.maybe Decode.string))
                 (Decode.field "feed_id" Decode.int)
                 (Decode.field "feed_title" (Decode.maybe Decode.string))
                 (Decode.field "feed_url" Decode.string)
+                (Decode.field "seen" Decode.bool)
     in
     Decode.map2 (\d ls -> { date = d, links = ls }) date links
 
 
 
 -- API CALLS
+
+
+markAsSeen : Model -> String -> Cmd Msg
+markAsSeen model dateString =
+    Http.post
+        { url = model.apiEndpoint
+        , body = Http.jsonBody (makePostBody "digests" "seen" (Just <| Encode.string dateString))
+        , expect = Http.expectWhatever (\_ -> NoOp)
+        }
 
 
 getLatestDigest : Model -> Cmd Msg

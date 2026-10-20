@@ -92,7 +92,7 @@ instance ToJSON TgMsg where
 
 data Resource = Health | Echo | Feeds | Links | Digests | InvalidResource deriving (Show)
 
-data Action = Test | Add | List | Get | Remove | Refresh | Import | InvalidAction deriving (Show)
+data Action = Test | Add | List | Get | Remove | Refresh | Import | MarkAsSeen | InvalidAction deriving (Show)
 
 data RpcRequest = RpcRequest
   { reqResource :: Resource
@@ -129,6 +129,7 @@ instance FromJSON Action where
     "remove" -> pure Remove
     "refresh" -> pure Refresh
     "import" -> pure Import
+    "seen" -> pure MarkAsSeen
     _ -> pure InvalidAction
 
 instance FromJSON RpcRequest where
@@ -180,13 +181,14 @@ data FeedLinksResponse = FeedLinksResponse
   { fiLink :: String
   , fiTitle :: String
   , fiUpdated :: String
+  , fiSeen :: Int
   }
 
 instance FromRow FeedLinksResponse where
-  fromRow = FeedLinksResponse <$> field <*> field <*> field
+  fromRow = FeedLinksResponse <$> field <*> field <*> field <*> field
 
 instance ToJSON FeedLinksResponse where
-  toJSON FeedLinksResponse{..} = object ["url" .= fiLink, "title" .= fiTitle, "updated" .= fiUpdated]
+  toJSON FeedLinksResponse{..} = object ["url" .= fiLink, "title" .= fiTitle, "updated" .= fiUpdated, "seen" .= if fiSeen == 1 then True else False]
 
 data ApiErrorObject = ApiErrorObject
   { errorType :: String
@@ -212,11 +214,12 @@ data DigestLink = DigestLink
   , dfeedId :: Int
   , dfeedTitle :: Maybe String
   , dfeedUrl :: String
+  , dSeenStatus :: Int
   }
   deriving (Show)
 
 instance ToJSON DigestLink where
-  toJSON DigestLink{..} = object ["link" .= dlink, "title" .= dtitle, "feed_id" .= dfeedId, "feed_title" .= dfeedTitle, "feed_url" .= dfeedUrl]
+  toJSON DigestLink{..} = object ["link" .= dlink, "title" .= dtitle, "feed_id" .= dfeedId, "feed_title" .= dfeedTitle, "feed_url" .= dfeedUrl, "seen" .= if dSeenStatus == 1 then True else False ]
 
 instance ToJSON Digest where
   toJSON Digest{..} = object ["date" .= digestDate, "links" .= map toJSON digestLinks]
