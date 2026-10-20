@@ -45,8 +45,8 @@ getFeed feedId conn = query' conn (fromString "select id, title, url, website_ur
 getFeedLinksWithParams :: Connection -> PageParams -> Maybe Int -> IO [FeedLinksResponse]
 getFeedLinksWithParams conn PageParams{..} maybeFeedId =
   case maybeFeedId of
-    Nothing -> query' conn (fromString "select link, title, updated from feed_items order by updated desc limit ? offset ?") (pageLimit, pageOffset)
-    Just v -> query' conn (fromString "select link, title, updated from feed_items where feed_id = ? order by updated desc limit ? offset ?") (v, pageLimit, pageOffset)
+    Nothing -> query' conn (fromString "select link, title, updated, seen_status from feed_items order by updated desc limit ? offset ?") (pageLimit, pageOffset)
+    Just v -> query' conn (fromString "select link, title, updated, seen_status from feed_items where feed_id = ? order by updated desc limit ? offset ?") (v, pageLimit, pageOffset)
 
 insertFeed :: Connection -> URL -> IO (Int, URL)
 insertFeed conn feedUrl = do
@@ -94,24 +94,24 @@ doesMigrationTableExist = undefined
 
 getDigestsFull :: Connection -> PageParams -> IO [Digest]
 getDigestsFull conn PageParams{..} = do
-  let q1 = "SELECT fi.updated, fi.link, fi.title, fi.feed_id, f.title, f.url AS feed_title FROM feed_items fi JOIN feeds f ON fi.feed_id = f.id WHERE fi.updated IN (SELECT DISTINCT updated FROM feed_items ORDER BY updated DESC LIMIT ? OFFSET ?) ORDER BY fi.updated DESC;"
-  res <- query' conn (fromString q1) (pageLimit, pageOffset) :: IO [(Day, String, Maybe String, Int, Maybe String, String)]
+  let q1 = "SELECT fi.updated, fi.link, fi.title, fi.feed_id, f.title, f.url AS feed_title, fi.seen_status as seen FROM feed_items fi JOIN feeds f ON fi.feed_id = f.id WHERE fi.updated IN (SELECT DISTINCT updated FROM feed_items ORDER BY updated DESC LIMIT ? OFFSET ?) ORDER BY fi.updated DESC;"
+  res <- query' conn (fromString q1) (pageLimit, pageOffset) :: IO [(Day, String, Maybe String, Int, Maybe String, String, Int)]
   pure $ reverse $ convert $ Map.toList $ groupByUpdated res (Map.empty)
  where
-  groupByUpdated :: [(Day, String, Maybe String, Int, Maybe String, String)] -> Map.Map Day [(String, Maybe String, Int, Maybe String, String)] -> Map.Map Day [(String, Maybe String, Int, Maybe String, String)]
+  groupByUpdated :: [(Day, String, Maybe String, Int, Maybe String, String, Int)] -> Map.Map Day [(String, Maybe String, Int, Maybe String, String, Int)] -> Map.Map Day [(String, Maybe String, Int, Maybe String, String, Int)]
   groupByUpdated rows acc = case rows of
     [] -> acc
-    ((updated, link, title, feedId, feedTitle, feedUrl) : rest) ->
+    ((updated, link, title, feedId, feedTitle, feedUrl, seen) : rest) ->
       let existing = fromMaybe [] $ Map.lookup updated acc
-          newVal = (link, title, feedId, feedTitle, feedUrl) : existing
+          newVal = (link, title, feedId, feedTitle, feedUrl, seen) : existing
           newMap = Map.insert updated newVal acc
        in groupByUpdated rest newMap
 
-  convert :: [(Day, [(String, Maybe String, Int, Maybe String, String)])] -> [Digest]
+  convert :: [(Day, [(String, Maybe String, Int, Maybe String, String, Int)])] -> [Digest]
   convert = map f
    where
     f (date, xs) = Digest date (map g xs)
-    g (link, title, feedId, feedTitle, feedUrl) = DigestLink link title feedId feedTitle feedUrl
+    g (link, title, feedId, feedTitle, feedUrl, seenStatus) = DigestLink link title feedId feedTitle feedUrl seenStatus
 
 getDigests :: Connection -> PageParams -> IO [(Day,Int)]
 getDigests conn PageParams{..} = do
@@ -222,17 +222,17 @@ insertFeedItem conn (feedId, feedItem@FeedItem{..}) = do
 
 getDigestForDate :: Connection -> Maybe String -> IO (Maybe Digest)
 getDigestForDate conn date = do
-  let q = fromString "SELECT fi.updated, fi.link, fi.title, fi.feed_id, f.title, f.url AS feed_title FROM feed_items fi JOIN feeds f ON fi.feed_id = f.id WHERE fi.updated = ?;"
-  let q' = fromString "SELECT fi.updated, fi.link, fi.title, fi.feed_id, f.title, f.url AS feed_title FROM feed_items fi JOIN feeds f ON fi.feed_id = f.id WHERE fi.updated in (SELECT DISTINCT updated FROM feed_items ORDER BY updated DESC LIMIT 1);"
+  let q = fromString "SELECT fi.updated, fi.link, fi.title, fi.feed_id, f.title, f.url AS feed_title, fi.seen_status as seen FROM feed_items fi JOIN feeds f ON fi.feed_id = f.id WHERE fi.updated = ?;"
+  let q' = fromString "SELECT fi.updated, fi.link, fi.title, fi.feed_id, f.title, f.url AS feed_title, fi.seen_status as seen FROM feed_items fi JOIN feeds f ON fi.feed_id = f.id WHERE fi.updated in (SELECT DISTINCT updated FROM feed_items ORDER BY updated DESC LIMIT 1);"
   res <- case date of
-    Just d -> query' conn q (Only d) :: IO [(Day, String, Maybe String, Int, Maybe String, String)]
-    Nothing -> query_' conn q' :: IO [(Day, String, Maybe String, Int, Maybe String, String)]
+    Just d -> query' conn q (Only d) :: IO [(Day, String, Maybe String, Int, Maybe String, String, Int)]
+    Nothing -> query_' conn q' :: IO [(Day, String, Maybe String, Int, Maybe String, String, Int)]
   pure $
     case res of
       [] -> Nothing
-      ((updated, _, _, _, _, _) : _) -> Just $ Digest updated (map f res)
+      ((updated, _, _, _, _, _, _) : _) -> Just $ Digest updated (map f res)
  where
-  f (_, link, title, feedId, feedTitle, feedUrl) = DigestLink link title feedId feedTitle feedUrl
+  f (_, link, title, feedId, feedTitle, feedUrl, seen) = DigestLink link title feedId feedTitle feedUrl seen
 
 getTotalFeeds :: Connection -> IO Int
 getTotalFeeds conn = do
@@ -269,6 +269,12 @@ insertFeeds pool urls = do
                   pure $ Just v
           )
     )
+
+markAsSeen :: Connection -> String -> IO Bool
+markAsSeen conn dateString = do
+    let q = fromString "UPDATE feed_items SET seen_status = 1 where updated = ?"
+    execute' conn q (Only dateString)
+    pure True -- if query fails, the function will throw. caught
 
 -- MIGRATION LOGIC
 
