@@ -1,5 +1,11 @@
 # rdigest - Changelog
 
+## v0.5.1
+
+- Cleanup Model and Msgs and use Http.task for sequencing latest digest.
+- Add 'Hide Seen' toggle.
+- Remove styles.css and gitignore generated files for UI.
+
 ## v0.5.0
 
 - Add 'seen_status' column to feed_items table.

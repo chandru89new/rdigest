@@ -11,7 +11,7 @@ import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Http
-import Json.Decode as Decode
+import Json.Decode as Decode exposing (errorToString)
 import Json.Encode as Encode
 import String exposing (fromInt)
 import Task
@@ -46,16 +46,16 @@ type alias Model =
     , url : Url
     , apiEndpoint : String
     , feeds : RemotePaginatedData String (List Feed)
-    , digest : RemoteData String Digest
-    , dashboardDigest : RemoteData String Digest
     , digests : RemotePaginatedData String (List ( Date.Date, Int ))
     , currPage : Page
+    , currDigest : RemoteData String Digest
     , digestSearchTerm : String
     , currFeed : RemoteData String Feed
     , feedLinks : RemotePaginatedData String (List FeedLink)
     , today : Maybe Date.Date -- if Nothing, date is not set.
     , adminMode : Bool
     , detailsOpen : Bool
+    , hideSeen : Bool
     }
 
 
@@ -76,7 +76,7 @@ type Msg
     | GotFeedsList (Result String ( List Feed, PageParams, Int ))
     | GotDigest (Result String Digest)
     | GetDigests PageParams
-    | GotDigests (Result String ( List ( Date.Date, Int ), PageParams, Int ))
+    | GotDigests (Result String { digests : List ( Date.Date, Int ), pageParams : PageParams, total : Int })
     | GetFeeds PageParams
     | UpdateDigestSearchTerm String
     | RefreshFeed
@@ -92,9 +92,9 @@ type Msg
     | GotFeed (Result String Feed)
     | GetToday
     | GotToday Date.Date
-    | GotDashboardDigest (Result String Digest)
     | ToggleAdminMode Bool
     | ToggleDetails Bool
+    | ToggleSeenLinks Bool
     | NoOp
 
 
@@ -170,8 +170,7 @@ init () url key =
             , url = url
             , digests = Loading_ { limit = 100 }
             , feeds = Loading_ { limit = 100 }
-            , dashboardDigest = Loading
-            , digest = Loading
+            , currDigest = Loading
             , currPage = parseUrl url
             , digestSearchTerm = ""
             , feedLinks = Loading_ { limit = 1000 }
@@ -179,6 +178,7 @@ init () url key =
             , today = Nothing
             , adminMode = False
             , detailsOpen = True
+            , hideSeen = True
             }
     in
     ( initModel, Cmd.batch [ Task.perform (\_ -> GetToday) (Task.succeed 1), pageCmdsToRun initModel <| parseUrl url ] )
@@ -194,14 +194,14 @@ update msg model =
         NoOp ->
             ( model, Cmd.none )
 
+        ToggleSeenLinks b ->
+            ( { model | hideSeen = b }, Cmd.none )
+
         ToggleDetails b ->
             ( { model | detailsOpen = b }, Cmd.none )
 
         ToggleAdminMode b ->
             ( { model | adminMode = b }, Cmd.none )
-
-        GotDashboardDigest res ->
-            ( { model | dashboardDigest = resultToRemoteData res }, Cmd.none )
 
         GetDigests p ->
             ( model, getDigests model p )
@@ -214,8 +214,9 @@ update msg model =
                 newModel =
                     { model | today = Just d }
             in
-            ( newModel, getDigests newModel (getPageParams model.digests) )
+            ( newModel, Cmd.none )
 
+        -- ( newModel, getDigests newModel (getPageParams model.digests) )
         ImportDone res ->
             case res of
                 Ok _ ->
@@ -378,40 +379,23 @@ update msg model =
                     ( { model | feeds = Loaded_ feeds p total }, Cmd.none )
 
         GotDigests res ->
-            let
-                hasLatestDigest =
-                    case model.dashboardDigest of
-                        Loading ->
-                            False
-
-                        _ ->
-                            True
-            in
             case res of
                 Err e ->
                     ( { model | digests = Error_ e (getPageParams model.digests) }
-                    , if not hasLatestDigest then
-                        getLatestDigest model
-
-                      else
-                        Cmd.none
+                    , Cmd.none
                     )
 
-                Ok ( digests, newPageParams, total ) ->
+                Ok { digests, pageParams, total } ->
                     let
                         newModel =
-                            { model | digests = Loaded_ digests newPageParams total }
+                            { model | digests = Loaded_ digests pageParams total }
                     in
                     ( newModel
-                    , if hasLatestDigest then
-                        Cmd.none
-
-                      else
-                        getLatestDigest newModel
+                    , Cmd.none
                     )
 
         GotDigest res ->
-            ( { model | digest = resultToRemoteData res }, Cmd.none )
+            ( { model | currDigest = resultToRemoteData res }, Cmd.none )
 
         GetFeeds pageParams ->
             ( model, getFeedsList model pageParams )
@@ -505,8 +489,8 @@ viewLinkGroup detailsToggle ( group, links ) =
         ]
 
 
-viewLatestDigest : String -> Bool -> RemoteData String Digest -> Html Msg
-viewLatestDigest searchTerm detailsOpen r =
+viewLatestDigest : Model -> String -> RemoteData String Digest -> Html Msg
+viewLatestDigest model searchTerm r =
     case r of
         Loading ->
             div [] [ text "Loading..." ]
@@ -524,7 +508,10 @@ viewLatestDigest searchTerm detailsOpen r =
                     Digest digest.date
                         (List.filter
                             (\item ->
-                                if String.length (String.trim <| String.toLower searchTerm) == 0 then
+                                if model.hideSeen && item.seen == True then
+                                    False
+
+                                else if String.length (String.trim <| String.toLower searchTerm) == 0 then
                                     True
 
                                 else
@@ -540,7 +527,7 @@ viewLatestDigest searchTerm detailsOpen r =
                         )
             in
             div [ class "flex flex-col gap-y-4" ]
-                [ div [ class "flex flex-col gap-y-2.5" ] [ viewDigest detailsOpen digestFiltered ]
+                [ div [ class "flex flex-col gap-y-2.5" ] [ viewDigest model digestFiltered ]
                 , div [ class "flex items-center justify-center" ]
                     [ a [ class "cursor-pointer", href "#", onClick (ShowConfirm "Mark all links in this digest as seen?" (encodeKeyValue "markAsSeen" (dateToString digestFiltered.date) Nothing)) ] [ text "Mark as seen" ]
                     ]
@@ -648,21 +635,28 @@ viewDigestsList model =
                     ]
 
 
-viewDigest : Bool -> Digest -> Html Msg
-viewDigest detailsOpen { date, links } =
+viewDigest : Model -> Digest -> Html Msg
+viewDigest model { date, links } =
     let
         grouped =
             groupDigestLinksByFeedUrl links
     in
     div [ class "flex flex-col gap-y-4" ]
-        [ div [ class "flex items-center justify-between" ]
+        [ div [ class "flex flex-col gap-y-3 md:flex-row md:items-center md:justify-between" ]
             [ h3 []
                 [ text <| String.join "" [ toFriendlyDate date, " ", "(", fromInt <| List.length links, ")" ] ]
-            , span [ class "cursor-pointer text-blue-600", onClick (ToggleDetails (not detailsOpen)) ] [ text "Toggle expand/collapse" ]
+            , div [ class "flex items-center gap-x-3" ]
+                [ span
+                    [ class "flex items-center gap-x-2 cursor-pointer" ]
+                    [ input [ id "seen-toggle", name "seen-toggle", type_ "checkbox", checked model.hideSeen, onCheck ToggleSeenLinks ] [], label [ for "seen-toggle" ] [ text "Hide seen" ] ]
+                , span
+                    [ class "cursor-pointer text-blue-600", onClick (ToggleDetails (not model.detailsOpen)) ]
+                    [ text "Expand/collapse" ]
+                ]
             ]
         , input [ class "p-2 text-sm border rounded-md border-slate-200 w-full", placeholder "Search in digest...", onInput UpdateDigestSearchTerm ] []
         , div [ class "grid grid-cols-1 lg:grid-cols-1 gap-4" ] <|
-            List.map (viewLinkGroup detailsOpen) (List.reverse <| List.sortBy (\( _, ls ) -> List.length ls) <| Dict.toList grouped)
+            List.map (viewLinkGroup model.detailsOpen) (List.reverse <| List.sortBy (\( _, ls ) -> List.length ls) <| Dict.toList grouped)
         ]
 
 
@@ -836,7 +830,7 @@ view model =
             , div [ class "app-content" ]
                 [ case model.currPage of
                     DashboardPage ->
-                        viewLatestDigest model.digestSearchTerm model.detailsOpen model.dashboardDigest
+                        viewLatestDigest model model.digestSearchTerm model.currDigest
 
                     FeedsPage Nothing ->
                         div [] [ viewFeedsList model ]
@@ -850,7 +844,7 @@ view model =
                                 viewDigestsList model
 
                             Just _ ->
-                                viewLatestDigest model.digestSearchTerm model.detailsOpen model.digest
+                                viewLatestDigest model model.digestSearchTerm model.currDigest
                 ]
             ]
         ]
@@ -946,7 +940,7 @@ pageCmdsToRun model page =
     in
     case page of
         DashboardPage ->
-            Cmd.batch [ Task.perform (\_ -> GetToday) (Task.succeed 1), resetAdminMode ]
+            Task.attempt GotDigest (getLatestDigestTask model)
 
         FeedsPage Nothing ->
             Cmd.batch [ getFeedsList model { limit = Basics.clamp 100 10000 (getPageParams model.digests).limit }, resetAdminMode ]
@@ -959,12 +953,20 @@ pageCmdsToRun model page =
                 ]
 
         DigestsPage d ->
-            Cmd.batch
-                [ if d == Nothing then
-                    getDigests model { limit = Basics.clamp 10 10000 (getPageParams model.digests).limit }
+            let
+                date =
+                    Maybe.map toDateDefault d
 
-                  else
-                    getDigestForDate model (Maybe.map (\a -> toDateDefault a) d)
+                mainCmd =
+                    case date of
+                        Nothing ->
+                            getDigests model { limit = Basics.clamp 10 10000 (getPageParams model.digests).limit }
+
+                        Just d_ ->
+                            getDigestForDate model d_
+            in
+            Cmd.batch
+                [ mainCmd
                 , resetAdminMode
                 ]
 
@@ -1196,42 +1198,6 @@ markAsSeen model dateString =
         }
 
 
-getLatestDigest : Model -> Cmd Msg
-getLatestDigest model =
-    let
-        ds =
-            case model.digests of
-                Loaded_ xs _ _ ->
-                    xs
-
-                _ ->
-                    []
-
-        latestDigestDate =
-            Maybe.andThen
-                (\today -> List.head (List.filter (fn today) (List.map Tuple.first ds)))
-                model.today
-
-        fn t d =
-            Date.compare d t == LT
-    in
-    Http.post
-        { url = model.apiEndpoint
-        , body = Http.jsonBody (makePostBody "digests" "get" (Maybe.map (Encode.string << dateToString) latestDigestDate))
-        , expect =
-            Http.expectJson
-                (\res ->
-                    case res of
-                        Err e ->
-                            GotDashboardDigest (Err <| httpErrorToString e)
-
-                        Ok f ->
-                            GotDashboardDigest (Ok f)
-                )
-                digestDecoder
-        }
-
-
 addFeedsFromOpml : Model -> Encode.Value -> Cmd Msg
 addFeedsFromOpml model contents =
     Http.post
@@ -1399,51 +1365,81 @@ getFeedsList model p =
         }
 
 
-getDigestForDate : Model -> Maybe Date.Date -> Cmd Msg
-getDigestForDate model maybeDate =
-    Http.post
-        { url = model.apiEndpoint
-        , body = Http.jsonBody (makePostBody "digests" "get" (Maybe.map (Encode.string << dateToString) maybeDate))
-        , expect =
-            Http.expectJson
-                (\res ->
-                    case res of
-                        Err e ->
-                            GotDigest (Err <| httpErrorToString e)
-
-                        Ok f ->
-                            GotDigest (Ok f)
-                )
-                digestDecoder
-        }
+getDigestForDate : Model -> Date.Date -> Cmd Msg
+getDigestForDate model date =
+    Task.attempt GotDigest (getDigestTask model date)
 
 
 getDigests : Model -> PageParams -> Cmd Msg
 getDigests model pageParams =
-    Http.post
-        { url = model.apiEndpoint
+    Task.attempt GotDigests (getDigestsTask model pageParams)
+
+
+getDigestTask : Model -> Date.Date -> Task.Task String Digest
+getDigestTask model date =
+    Http.task
+        { method = "post"
+        , headers = []
+        , url = model.apiEndpoint
+        , body = Http.jsonBody (makePostBody "digests" "get" (Just <| Encode.string (dateToString date)))
+        , timeout = Nothing
+        , resolver =
+            Http.stringResolver
+                (handleRawHttpResponse digestDecoder)
+        }
+
+
+getLatestDigestTask : Model -> Task.Task String Digest
+getLatestDigestTask model =
+    let
+        latestDate =
+            Task.map2
+                (\today { digests } ->
+                    let
+                        latestDigestDate =
+                            Maybe.withDefault today <|
+                                Maybe.map Tuple.first <|
+                                    List.head <|
+                                        List.filter (\( d, _ ) -> Date.compare d today == LT) digests
+                    in
+                    latestDigestDate
+                )
+                Date.today
+                (getDigestsTask model { limit = 10 })
+    in
+    Task.andThen (getDigestTask model) latestDate
+
+
+getDigestsTask : Model -> PageParams -> Task.Task String { digests : List ( Date.Date, Int ), pageParams : PageParams, total : Int }
+getDigestsTask model pageParams =
+    Http.task
+        { method = "post"
+        , headers = []
+        , url = model.apiEndpoint
         , body = Http.jsonBody (makePostBody "digests" "list" (Just (encodePageParams pageParams)))
-        , expect =
-            Http.expectJson
+        , timeout = Nothing
+        , resolver =
+            Http.stringResolver
                 (\res ->
                     case res of
-                        Err e ->
-                            case e of
-                                Http.BadStatus 404 ->
-                                    GotDigests (Err "No digest here. Maybe try adding feeds / refreshing feeds?")
+                        Http.GoodStatus_ _ body ->
+                            let
+                                decoder =
+                                    Decode.map2 (\digests total -> { digests = digests, pageParams = pageParams, total = total })
+                                        (Decode.field "digests" <|
+                                            Decode.list digestDateCountDecoder
+                                        )
+                                        (Decode.field "total" Decode.int)
+                            in
+                            case Decode.decodeString decoder body of
+                                Ok d ->
+                                    Ok d
 
-                                _ ->
-                                    GotDigests (Err <| httpErrorToString e)
+                                Err e ->
+                                    Err (errorToString e)
 
-                        Ok f ->
-                            GotDigests (Ok f)
-                )
-                (Decode.map3 (\a b c -> ( a, b, c ))
-                    (Decode.field "digests" <|
-                        Decode.list digestDateCountDecoder
-                    )
-                    (Decode.succeed pageParams)
-                    (Decode.field "total" Decode.int)
+                        _ ->
+                            Err "Error getting digests."
                 )
         }
 
@@ -1459,9 +1455,6 @@ port showPrompt : ( String, Encode.Value ) -> Cmd msg
 
 
 port showConfirm : ( String, Encode.Value ) -> Cmd msg
-
-
-port confirmRemoveFeed : (Bool -> msg) -> Sub msg
 
 
 port getPromptResponse : (( String, String ) -> msg) -> Sub msg

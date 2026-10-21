@@ -6,3 +6,5 @@ rdtest
 node_modules
 ui/node_modules
 ui/elm-stuff
+ui/public/elm.js
+ui/public/style.css
