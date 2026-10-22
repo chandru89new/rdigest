@@ -273,6 +273,7 @@ insertFeeds pool urls = do
 markAsSeen :: Connection -> String -> IO Bool
 markAsSeen conn dateString = do
     let q = fromString "UPDATE feed_items SET seen_status = 1 where updated = ?"
+    _ <- setPragmas conn
     execute' conn q (Only dateString)
     pure True -- if query fails, the function will throw. caught
 
