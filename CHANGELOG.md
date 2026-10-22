@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.5.2
+
+- Fix markAsSeen DB call to set pragmas.
+
 ## v0.5.1
 
 - Cleanup Model and Msgs and use Http.task for sequencing latest digest.

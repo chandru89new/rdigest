@@ -95,6 +95,7 @@ type Msg
     | ToggleAdminMode Bool
     | ToggleDetails Bool
     | ToggleSeenLinks Bool
+    | GotMarkAsSeenResponse (Result String ())
     | NoOp
 
 
@@ -194,6 +195,14 @@ update msg model =
         NoOp ->
             ( model, Cmd.none )
 
+        GotMarkAsSeenResponse res ->
+            case res of
+                Err str ->
+                    ( model, showAlert str )
+
+                Ok _ ->
+                    ( model, Nav.reload )
+
         ToggleSeenLinks b ->
             ( { model | hideSeen = b }, Cmd.none )
 
@@ -271,8 +280,8 @@ update msg model =
                             Decode.decodeValue Decode.string dateString
                     in
                     case decodeResult of
-                        Err _ ->
-                            ( model, Cmd.none )
+                        Err e ->
+                            ( model, showAlert ("Could not decode the date:" ++ errorToString e) )
 
                         Ok ds ->
                             ( model, markAsSeen model ds )
@@ -529,7 +538,7 @@ viewLatestDigest model searchTerm r =
             div [ class "flex flex-col gap-y-4" ]
                 [ div [ class "flex flex-col gap-y-2.5" ] [ viewDigest model digestFiltered ]
                 , div [ class "flex items-center justify-center" ]
-                    [ a [ class "cursor-pointer", href "#", onClick (ShowConfirm "Mark all links in this digest as seen?" (encodeKeyValue "markAsSeen" (dateToString digestFiltered.date) Nothing)) ] [ text "Mark as seen" ]
+                    [ button [ class "cursor-pointer", onClick (ShowConfirm "Mark all links in this digest as seen?" (encodeKeyValue "markAsSeen" (dateToString digestFiltered.date) Nothing)) ] [ text "Mark as seen" ]
                     ]
                 ]
 
@@ -1194,7 +1203,7 @@ markAsSeen model dateString =
     Http.post
         { url = model.apiEndpoint
         , body = Http.jsonBody (makePostBody "digests" "seen" (Just <| Encode.string dateString))
-        , expect = Http.expectWhatever (\_ -> NoOp)
+        , expect = Http.expectWhatever (Result.mapError httpErrorToString >> GotMarkAsSeenResponse)
         }
 
 
