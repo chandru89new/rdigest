@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.6.1
+
+- Fix WAL pragma command.
+
 ## v0.6.0
 
 - Auto-refresh feeds on schedule.

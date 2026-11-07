@@ -87,7 +87,7 @@ setPragmas :: Connection -> IO ()
 setPragmas conn = do
   execute_' conn (fromString "PRAGMA foreign_keys = ON;")
   execute_' conn (fromString "PRAGMA busy_timeout = 10000;")
-  execute_' conn (fromString "PRAGMA wal = 1;")
+  execute_' conn (fromString "PRAGMA journal_mode = WAL;")
 
 doesMigrationTableExist :: Connection -> IO Bool
 doesMigrationTableExist = undefined
