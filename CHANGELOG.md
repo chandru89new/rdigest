@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.6.2
+
+- Inc feeds list default limit to 1000.
+
 ## v0.6.1
 
 - Fix WAL pragma command.

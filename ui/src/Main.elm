@@ -170,7 +170,7 @@ init () url key =
             , key = key
             , url = url
             , digests = Loading_ { limit = 100 }
-            , feeds = Loading_ { limit = 100 }
+            , feeds = Loading_ { limit = 1000 }
             , currDigest = Loading
             , currPage = parseUrl url
             , digestSearchTerm = ""
