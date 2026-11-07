@@ -15,7 +15,7 @@ module Server where
 
 import Control.Concurrent
 import Control.Concurrent.Async (concurrently_)
-import Control.Monad (join)
+import Control.Monad (join, forever)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
 import DB
@@ -67,6 +67,7 @@ startServer port = do
     Config{..} <- ask
     liftIO $ do
       pool <- newPool (defaultPoolConfig (open (getDBFile rdigestPath)) close 60.0 10)
+      _ <- refreshFeedsOnSchedule pool
       scotty port $ do
         get "/" serveIndex
         get "/export-opml" $ do
@@ -233,6 +234,18 @@ extractPageParams reqData = do
   case reqData of
     Nothing -> pure $ PageParams 10 0 :: ActionM PageParams
     Just value -> parseRequest (Just value) :: ActionM PageParams
+
+
+refreshFeedsOnSchedule :: Pool Connection -> IO ()
+refreshFeedsOnSchedule pool = do
+    _ <- forkIO $ forever $ do
+        threadDelay (1000 * 1000 * 60 * 60) -- 1 hr interval
+        putStrLn "Starting auto-refresh..."
+        r <- try' (updateAllFeeds pool)
+        case r of
+            Right _ -> putStrLn "Auto-refresh complete."
+            Left e -> showAppError e
+    pure ()
 
 -- TEST
 
