@@ -2,7 +2,9 @@
 
 # install ghcup
 sudo apt-get update
-sudo apt-get install -y curl g++ libgmp-dev make # Ensure dependencies
+# binutils-gold: GHC 9.4.8 links with -fuse-ld=gold, and from Ubuntu 26.04 the
+# gold linker is no longer part of the default binutils package.
+sudo apt-get install -y curl g++ libgmp-dev make binutils-gold # Ensure dependencies
 curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh -s -- -y
 export PATH=$PATH:"$HOME/.ghcup/bin"
 
