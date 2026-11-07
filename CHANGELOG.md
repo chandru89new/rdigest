@@ -1,5 +1,9 @@
 # rdigest - Changelog
 
+## v0.6.0
+
+- Auto-refresh feeds on schedule.
+
 ## v0.5.2
 
 - Fix markAsSeen DB call to set pragmas.
