@@ -66,8 +66,7 @@ startServer port = do
     initDB
     Config{..} <- ask
     liftIO $ do
-      pool <- newPool (defaultPoolConfig (open (getDBFile rdigestPath)) close 60.0 10)
-      _ <- refreshFeedsOnSchedule pool
+      _ <- refreshFeedsOnSchedule connPool
       scotty port $ do
         get "/" serveIndex
         get "/export-opml" $ do
@@ -79,7 +78,7 @@ startServer port = do
                 raw (generatelOpmlFile string)
             )
             $ do
-              withResource pool getAllFeedsForOpmlExport
+              withResource connPool getAllFeedsForOpmlExport
         get (regex "^/(.+)$") $ do
           path <- captureParam "1"
           case lookup path uiFiles of
@@ -101,14 +100,14 @@ startServer port = do
                       json $ object ["error" .= appErrToObj (GeneralError "No feeds found.")]
                     (h : _) -> json $ toJSON h
                 )
-                $ withResource pool (getFeed fid)
+                $ withResource connPool (getFeed fid)
             (Feeds, List) -> do
               pageParams <- extractPageParams reqData
               runApiFn
                 (errWithStatus status400)
                 (\(x, total) -> json $ object ["feeds" .= toJSON x, "params" .= toJSON pageParams, "total" .= toJSON total])
                 $ withResource
-                  pool
+                  connPool
                   ( \conn -> do
                       lfr <- getFeedsListWithParams conn pageParams
                       total <- getTotalFeeds conn
@@ -121,7 +120,7 @@ startServer port = do
                   runApiFn
                     (errWithStatus status400)
                     (\(fid, furl) -> json $ object ["id" .= fid, "url" .= furl])
-                    $ withResource pool (flip insertFeed h)
+                    $ withResource connPool (flip insertFeed h)
                 _ -> do
                   status status400
                   json $ object ["error" .= appErrToObj (GeneralError "Need at least one url in the `urls`.")]
@@ -131,12 +130,12 @@ startServer port = do
               runApiFn
                 (errWithStatus status400)
                 (\_ -> status status204)
-                $ withResource pool (removeFeed url)
+                $ withResource connPool (removeFeed url)
             (Feeds, Refresh) -> do
               runApiFn
                 (errWithStatus status400)
                 (\_ -> status status204)
-                $ concurrently_ (updateAllFeeds pool) (pure ())
+                $ concurrently_ (updateAllFeeds connPool) (pure ())
             (Feeds, Import) -> do
               opml <- parseRequest reqData :: ActionM String
               runApiFn
@@ -144,7 +143,7 @@ startServer port = do
                 (\_ -> status status204)
                 $ forkIO
                 $ do
-                  _ <- insertFeeds pool (catMaybes (extractXmlUrlsFromOpmlString opml))
+                  _ <- insertFeeds connPool (catMaybes (extractXmlUrlsFromOpmlString opml))
                   pure ()
             (Links, List) -> do
               pageParams <- extractPageParams reqData
@@ -152,14 +151,14 @@ startServer port = do
               runApiFn
                 (errWithStatus status400)
                 (\links -> json $ object ["links" .= toJSON links, "params" .= toJSON pageParams])
-                $ withResource pool (\c -> getFeedLinksWithParams c pageParams feedId)
+                $ withResource connPool (\c -> getFeedLinksWithParams c pageParams feedId)
             (Digests, List) -> do
               pageParams <- extractPageParams reqData
               runApiFn
                 (errWithStatus status400)
                 (\(x, t) -> json $ object ["digests" .= toJSON x, "total" .= t, "params" .= toJSON pageParams])
                 $ withResource
-                  pool
+                  connPool
                   ( \conn -> do
                       total <- getTotalDigests conn
                       res <- getDigests conn pageParams
@@ -173,7 +172,7 @@ startServer port = do
                     Nothing -> errWithStatus status404 (DatabaseError "No digest found.")
                     Just v' -> json $ toJSON v'
                 )
-                $ withResource pool (flip getDigestForDate date)
+                $ withResource connPool (flip getDigestForDate date)
             (Digests, MarkAsSeen) -> do
               date <- if (isJust reqData) then parseRequest reqData else pure Nothing :: ActionM (Maybe String)
               case date of
@@ -184,7 +183,7 @@ startServer port = do
                       False -> errWithStatus status404 (DatabaseError "No digest found.")
                       True -> status status204
                   )
-                  $ withResource pool (\conn -> markAsSeen conn d)
+                  $ withResource connPool (\conn -> markAsSeen conn d)
             (Echo, _) -> json $ object ["request" .= show r]
             _ -> do
               status status400

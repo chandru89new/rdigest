@@ -22,6 +22,7 @@ import Data.Pool (defaultPoolConfig, destroyAllResources, newPool)
 import Data.String (IsString (fromString))
 import Data.Text hiding (show)
 import Data.Text.Encoding
+import Data.Text.Encoding.Error (lenientDecode)
 import Data.Time
 import Database.SQLite.Simple
 import Network.HTTP.Simple hiding (Query)
@@ -116,17 +117,15 @@ runAppM app = do
       either showAppError (const $ return ()) res
 
 extractFeedItems :: BS.ByteString -> Maybe [FeedItem]
-extractFeedItems = parseContents
- where
-  parseContents c =
-    let tags = parseTags (decodeUtf8 c)
-        entryTags = partitions (~== ("<entry>" :: String)) tags -- this is for youtube feeds only
-        itemTags = partitions (~== ("<item>" :: String)) tags
-     in case (itemTags, entryTags) of
-          ([], []) -> Nothing
-          (xs, []) -> Just $ Prelude.map extractFeedItem xs
-          ([], ys) -> Just $ Prelude.map extractFeedItem ys
-          (xs, ys) -> Just $ Prelude.map extractFeedItem (xs ++ ys)
+extractFeedItems c =
+  -- Single pass over the tag stream. Scanning twice (once for <item>, once for
+  -- <entry>) forced the whole lexed document to be materialised and retained,
+  -- which cost ~100 bytes per character of feed text.
+  let tags = parseTags (decodeUtf8With lenientDecode c)
+      isItemStart t = t ~== ("<item>" :: String) || t ~== ("<entry>" :: String) -- <entry> is for atom/youtube feeds
+   in case partitions isItemStart tags of
+        [] -> Nothing
+        xs -> Just $ Prelude.map extractFeedItem xs
 
 extractFeedItem :: [Tag Text] -> FeedItem
 extractFeedItem tags =
