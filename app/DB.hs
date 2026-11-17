@@ -15,6 +15,7 @@
 module DB where
 
 import Control.Concurrent (MVar, newMVar, putMVar, takeMVar)
+import Control.DeepSeq (force)
 import Control.Exception.Base
 import Control.Monad
 import Control.Monad.IO.Class
@@ -148,7 +149,10 @@ processFeed connPool (feedId, url) mvar = do
     feedIdExists <- query' conn (fromString "SELECT id FROM feeds where id = ?;") (Only feedId) :: IO [FeedId]
     when (null feedIdExists) $ throw $ DatabaseError "You have to first add this feed to your database. Try `rdigest add <url>`."
     contents <- fetchUrl url
-    !unwrappedFeedItems <- evaluate (extractFeedItems contents) >>= (pure . fromMaybe [])
+    -- Fully evaluate the parsed items here so the tagsoup parse tree (which is
+    -- ~100x the size of the raw feed) can be collected before we wait on the
+    -- MVar and start the slow database inserts.
+    !unwrappedFeedItems <- evaluate (force (fromMaybe [] (extractFeedItems contents)))
     when (null unwrappedFeedItems) $ do
       putStrLn $ "I couldn't find anything on: " ++ url ++ "."
     takeMVar mvar

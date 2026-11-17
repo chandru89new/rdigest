@@ -12,6 +12,7 @@
 
 module Types where
 
+import Control.DeepSeq (NFData (..))
 import Control.Exception
 import Control.Monad.Trans.Reader
 import Data.Aeson
@@ -52,6 +53,9 @@ data Config = Config
   {connPool :: Pool Connection, template :: String, indexTemplate :: String, rdigestPath :: String}
 
 data FeedItem = FeedItem {title :: String, link :: Maybe String, updated :: Maybe Day} deriving (Eq, Show)
+
+instance NFData FeedItem where
+  rnf (FeedItem t l u) = rnf t `seq` rnf l `seq` rnf u
 
 data Feed = Feed {url :: String, name :: String} deriving (Show)
 

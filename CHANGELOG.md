@@ -1,5 +1,10 @@
 # rdigest - Changelog
 
+## v0.6.3
+
+- Force evaluation of WHNF in TagSoup to reduce memory usage
+- Remove duplicate connection pool in startServer
+
 ## v0.6.2
 
 - Inc feeds list default limit to 1000.
